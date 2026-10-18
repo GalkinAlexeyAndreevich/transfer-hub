@@ -4,7 +4,7 @@ import { validateEnv } from './validate-env';
 
 const schema = z.object({
   DATABASE_URL: z.url({
-    protocol: /^postgres(ql)?:$/,
+    protocol: /^postgres(ql)?$/,
   }),
 });
 
