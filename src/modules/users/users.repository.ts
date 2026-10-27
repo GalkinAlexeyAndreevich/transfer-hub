@@ -32,6 +32,14 @@ export class UsersRepository {
       .executeTakeFirst();
   }
 
+  findAuthInfoByLogin(login: string) {
+    return this.database.db
+      .selectFrom('users')
+      .select(['id', 'password_hash'])
+      .where('login', '=', login)
+      .executeTakeFirst();
+  }
+
   update(id: number, data: UserChanges) {
     return this.database.db
       .updateTable('users')

@@ -9,4 +9,10 @@ export interface Database {
     birth_date: ColumnType<Date, string, string>;
     about: string | null;
   };
+
+  refresh_tokens: {
+    token_hash: string;
+    user_id: number;
+    expires_at: Date;
+  };
 }

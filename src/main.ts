@@ -1,3 +1,4 @@
+import { StandardSchemaValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { ConfigType } from '@nestjs/config';
 import { AppModule } from './app.module';
@@ -7,6 +8,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get<ConfigType<typeof appConfig>>(appConfig.KEY);
   app.enableShutdownHooks();
+  app.useGlobalPipes(new StandardSchemaValidationPipe());
   await app.listen(config.port);
 }
 bootstrap();

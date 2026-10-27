@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
@@ -12,13 +12,28 @@ export class UsersService {
   async create(dto: CreateUserDto) {
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_HASH_ROUNDS);
 
-    return this.userRepository.create({
-      login: dto.login,
-      email: dto.email,
-      password_hash: passwordHash,
-      birth_date: dto.birth_date,
-      about: dto.about ?? null,
-    });
+    try {
+      return await this.userRepository.create({
+        login: dto.login,
+        email: dto.email,
+        password_hash: passwordHash,
+        birth_date: dto.birth_date,
+        about: dto.about ?? null,
+      });
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === '23505'
+      ) {
+        throw new ConflictException(
+          'Пользователь с таким email или login уже существует',
+        );
+      }
+
+      throw error;
+    }
   }
 
   findAll() {
