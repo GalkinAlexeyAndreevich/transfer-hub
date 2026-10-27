@@ -36,6 +36,10 @@ export class UsersService {
     }
   }
 
+  findAuthInfoByLogin(login: string) {
+    return this.userRepository.findAuthInfoByLogin(login);
+  }
+
   findAll() {
     return this.userRepository.findAll();
   }

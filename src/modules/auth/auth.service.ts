@@ -1,5 +1,4 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { UsersRepository } from '../users/users.repository';
 import { JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'node:crypto';
@@ -21,7 +20,6 @@ function hashToken(token: string): string {
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly usersRepository: UsersRepository,
     private readonly usersService: UsersService,
     private readonly refreshTokens: RefreshTokensRepository,
     private readonly jwt: JwtService,
@@ -34,7 +32,7 @@ export class AuthService {
   }
 
   async login(login: string, password: string): Promise<TokenPair> {
-    const user = await this.usersRepository.findAuthInfoByLogin(login);
+    const user = await this.usersService.findAuthInfoByLogin(login);
 
     if (!user) {
       throw new UnauthorizedException('Неверный логин или пароль');
@@ -47,6 +45,16 @@ export class AuthService {
     }
 
     return this.startSession(user.id);
+  }
+
+  async me(userId: number) {
+    const user = await this.usersService.findOne(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('Пользователь не найден');
+    }
+
+    return user;
   }
 
   private async startSession(userId: number): Promise<TokenPair> {

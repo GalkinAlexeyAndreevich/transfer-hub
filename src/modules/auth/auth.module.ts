@@ -6,6 +6,7 @@ import { JwtModule } from '@nestjs/jwt';
 import jwtConfig from '../../config/jwt.config';
 import { ConfigType } from '@nestjs/config';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
+import { AccessTokenGuard } from './access-token.guard';
 
 @Module({
   imports: [
@@ -25,6 +26,6 @@ import { RefreshTokensRepository } from './refresh-tokens.repository';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, RefreshTokensRepository],
+  providers: [AuthService, RefreshTokensRepository, AccessTokenGuard],
 })
 export class AuthModule {}

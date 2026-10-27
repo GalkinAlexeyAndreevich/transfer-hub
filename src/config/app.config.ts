@@ -1,5 +1,5 @@
 import { registerAs } from '@nestjs/config';
-import z from 'zod';
+import { z } from 'zod';
 import { validateEnv } from './validate-env';
 
 const schema = z.object({

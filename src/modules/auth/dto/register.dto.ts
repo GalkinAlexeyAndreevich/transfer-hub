@@ -1,4 +1,4 @@
-import z from 'zod';
+import { z } from 'zod';
 
 export const registerSchema = z.object({
   login: z.string().min(1).max(50),
@@ -8,4 +8,4 @@ export const registerSchema = z.object({
   about: z.string().max(1000).nullish(),
 });
 
-export type registerDto = z.infer<typeof registerSchema>;
+export type RegisterDto = z.infer<typeof registerSchema>;
