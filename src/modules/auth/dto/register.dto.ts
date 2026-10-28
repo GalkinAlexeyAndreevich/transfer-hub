@@ -1,11 +1,8 @@
-import { z } from 'zod';
+import {
+  createUserSchema,
+  type CreateUserDto,
+} from '../../users/dto/create-user.dto';
 
-export const registerSchema = z.object({
-  login: z.string().min(1).max(50),
-  email: z.email().max(254),
-  password: z.string().min(12),
-  birth_date: z.iso.date(),
-  about: z.string().max(1000).nullish(),
-});
+export const registerSchema = createUserSchema;
 
-export type RegisterDto = z.infer<typeof registerSchema>;
+export type RegisterDto = CreateUserDto;

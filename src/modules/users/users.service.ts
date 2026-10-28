@@ -1,4 +1,8 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
@@ -10,6 +14,7 @@ const BCRYPT_HASH_ROUNDS = 10;
 export class UsersService {
   constructor(private readonly userRepository: UsersRepository) {}
   async create(dto: CreateUserDto) {
+    // TODO: заменить на argon
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_HASH_ROUNDS);
 
     try {
@@ -46,6 +51,16 @@ export class UsersService {
 
   findOne(id: number) {
     return this.userRepository.findOne(id);
+  }
+
+  async me(id: number) {
+    const user = await this.findOne(id);
+
+    if (!user) {
+      throw new UnauthorizedException('Пользователь не найден');
+    }
+
+    return user;
   }
 
   update(id: number, updateUserDto: UpdateUserDto) {

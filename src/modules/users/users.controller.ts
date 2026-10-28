@@ -1,28 +1,33 @@
 import {
   Controller,
   Get,
-  Post,
   Body,
   Patch,
   Param,
   Delete,
+  UseGuards,
+  Req,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
+import {
+  AccessTokenGuard,
+  type AuthenticatedRequest,
+} from '../auth/access-token.guard';
 
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Post()
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
-  }
-
   @Get()
   findAll() {
     return this.usersService.findAll();
+  }
+
+  @Get('me')
+  @UseGuards(AccessTokenGuard)
+  me(@Req() request: AuthenticatedRequest) {
+    return this.usersService.me(request.user.id);
   }
 
   @Get(':id')
@@ -31,8 +36,11 @@ export class UsersController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.usersService.update(+id, updateUserDto);
+  update(
+    @Param('id') id: string,
+    @Body({ schema: updateUserSchema }) dto: UpdateUserDto,
+  ) {
+    return this.usersService.update(+id, dto);
   }
 
   @Delete(':id')

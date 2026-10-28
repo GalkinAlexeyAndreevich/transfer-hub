@@ -1,16 +1,11 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
-
-export interface AccessTokenPayload {
-  sub: string;
-  exp: number;
-  iat?: number;
-}
+import { TokenService } from './token.service';
 
 export type AuthUser = {
   id: number;
+  jti: string;
 };
 
 export type AuthenticatedRequest = Request & {
@@ -19,7 +14,7 @@ export type AuthenticatedRequest = Request & {
 
 @Injectable()
 export class AccessTokenGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(private readonly tokenService: TokenService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -31,25 +26,11 @@ export class AccessTokenGuard implements CanActivate {
       throw new UnauthorizedException('Требуется Bearer-токен');
     }
 
-    let payload: AccessTokenPayload;
-
-    try {
-      payload = await this.jwtService.verifyAsync<AccessTokenPayload>(token);
-    } catch {
-      throw new UnauthorizedException('Токен недействителен или истёк');
-    }
-
-    const userId =
-      typeof payload.sub === 'string' && /^[1-9]\d*$/.test(payload.sub)
-        ? Number(payload.sub)
-        : NaN;
-
-    if (!Number.isSafeInteger(userId) || typeof payload.exp !== 'number') {
-      throw new UnauthorizedException('Некорректные данные токена');
-    }
+    const { userId, jti } = await this.tokenService.verifyAccessToken(token);
 
     request.user = {
       id: userId,
+      jti,
     };
 
     return true;

@@ -1,12 +1,10 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import bcrypt from 'bcrypt';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { UsersService } from '../users/users.service';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
-
-const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+import { TokenService } from './token.service';
 
 export type TokenPair = {
   access_token: string;
@@ -21,8 +19,8 @@ function hashToken(token: string): string {
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
-    private readonly refreshTokens: RefreshTokensRepository,
-    private readonly jwt: JwtService,
+    private readonly refreshTokensRepository: RefreshTokensRepository,
+    private readonly tokenService: TokenService,
   ) {}
 
   async register(dto: CreateUserDto): Promise<TokenPair> {
@@ -38,6 +36,7 @@ export class AuthService {
       throw new UnauthorizedException('Неверный логин или пароль');
     }
 
+    // TODO: Заменить на argon
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!isValidPassword) {
@@ -47,37 +46,43 @@ export class AuthService {
     return this.startSession(user.id);
   }
 
-  async me(userId: number) {
-    const user = await this.usersService.findOne(userId);
-
-    if (!user) {
-      throw new UnauthorizedException('Пользователь не найден');
-    }
-
-    return user;
+  async logout(refreshToken: string): Promise<void> {
+    await this.refreshTokensRepository.removeByHash(hashToken(refreshToken));
   }
 
-  private async startSession(userId: number): Promise<TokenPair> {
-    const tokens = await this.generateTokens(userId);
+  async refreshTokens(refreshToken: string): Promise<TokenPair> {
+    const { userId } = await this.tokenService.verifyRefreshToken(refreshToken);
 
-    await this.refreshTokens.create(
+    const { tokens, refreshExpiresAt } =
+      await this.tokenService.generateTokens(userId);
+
+    const rotated = await this.refreshTokensRepository.rotate(
+      hashToken(refreshToken),
       userId,
       hashToken(tokens.refresh_token),
-      new Date(Date.now() + REFRESH_TTL_MS),
+      refreshExpiresAt,
     );
+
+    if (!rotated) {
+      throw new UnauthorizedException({
+        code: 'REFRESH_TOKEN_INACTIVE',
+        message: 'Refresh token больше не активен',
+      });
+    }
 
     return tokens;
   }
 
-  private async generateTokens(userId: number): Promise<TokenPair> {
-    const accessToken = await this.jwt.signAsync({
-      sub: String(userId),
-      type: 'access',
-    });
+  private async startSession(userId: number): Promise<TokenPair> {
+    const { tokens, refreshExpiresAt } =
+      await this.tokenService.generateTokens(userId);
 
-    return {
-      access_token: accessToken,
-      refresh_token: randomBytes(32).toString('base64url'),
-    };
+    await this.refreshTokensRepository.create(
+      userId,
+      hashToken(tokens.refresh_token),
+      refreshExpiresAt,
+    );
+
+    return tokens;
   }
 }

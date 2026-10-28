@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { loginSchema, type LoginDto } from './dto/login.dto';
 import { registerSchema, type RegisterDto } from './dto/register.dto';
 import {
-  AccessTokenGuard,
-  type AuthenticatedRequest,
-} from './access-token.guard';
+  refreshTokenSchema,
+  type RefreshTokenDto,
+} from './dto/refresh-token.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -21,9 +21,16 @@ export class AuthController {
     return this.authService.login(dto.login, dto.password);
   }
 
-  @Get('me')
-  @UseGuards(AccessTokenGuard)
-  me(@Req() request: AuthenticatedRequest) {
-    return this.authService.me(request.user.id);
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  async logout(@Body({ schema: refreshTokenSchema }) dto: RefreshTokenDto) {
+    await this.authService.logout(dto.refresh_token);
+
+    return { message: 'Выход выполнен' };
+  }
+
+  @Post('refresh-token')
+  refreshTokens(@Body({ schema: refreshTokenSchema }) dto: RefreshTokenDto) {
+    return this.authService.refreshTokens(dto.refresh_token);
   }
 }
