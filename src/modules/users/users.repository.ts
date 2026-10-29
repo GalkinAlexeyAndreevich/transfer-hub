@@ -8,6 +8,12 @@ type UserChanges = Updateable<Omit<Database['users'], 'id'>>;
 
 const publicFields = ['id', 'login', 'email', 'birth_date', 'about'] as const;
 
+type FindUsersParams = {
+  limit: number;
+  offset: number;
+  login?: string;
+};
+
 @Injectable()
 export class UsersRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -20,8 +26,32 @@ export class UsersRepository {
       .executeTakeFirstOrThrow();
   }
 
-  findAll() {
-    return this.database.db.selectFrom('users').select(publicFields).execute();
+  async findAll({ limit, offset, login }: FindUsersParams) {
+    let query = this.database.db.selectFrom('users');
+
+    if (login) {
+      const escapedLogin = login.replace(/[\\%_]/g, '\\$&'); // экранирование для запроса
+
+      query = query.where('login', 'ilike', `%${escapedLogin}%`);
+    }
+
+    const [items, count] = await Promise.all([
+      query
+        .select(publicFields)
+        .orderBy('id', 'asc')
+        .limit(limit)
+        .offset(offset)
+        .execute(),
+
+      query
+        .select(({ fn }) => fn.countAll<string>().as('total'))
+        .executeTakeFirstOrThrow(),
+    ]);
+
+    return {
+      items,
+      total: Number(count.total),
+    };
   }
 
   findOne(id: number) {

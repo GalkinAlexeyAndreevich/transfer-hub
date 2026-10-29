@@ -7,6 +7,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
 import bcrypt from 'bcrypt';
+import type { FindUsersQueryDto } from './dto/find-users.dto';
 
 const BCRYPT_HASH_ROUNDS = 10;
 
@@ -45,8 +46,22 @@ export class UsersService {
     return this.userRepository.findAuthInfoByLogin(login);
   }
 
-  findAll() {
-    return this.userRepository.findAll();
+  async findAll({ page, limit, login }: FindUsersQueryDto) {
+    const { items, total } = await this.userRepository.findAll({
+      limit,
+      offset: (page - 1) * limit,
+      login,
+    });
+
+    return {
+      items,
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   findOne(id: number) {

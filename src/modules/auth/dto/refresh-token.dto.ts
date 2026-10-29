@@ -1,4 +1,3 @@
-// auth/dto/refresh-token.dto.ts
 import { z } from 'zod';
 
 export const refreshTokenSchema = z.strictObject({
