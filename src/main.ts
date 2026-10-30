@@ -11,4 +11,8 @@ async function bootstrap() {
   app.useGlobalPipes(new StandardSchemaValidationPipe());
   await app.listen(config.port);
 }
-bootstrap();
+
+bootstrap().catch((error: unknown) => {
+  console.error('Не удалось запустить приложение:', error);
+  process.exit(1);
+});
