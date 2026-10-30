@@ -1,19 +1,15 @@
+import { PasswordService } from 'src/common/password/password.service';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import * as argon2 from 'argon2';
-import { createHash } from 'node:crypto';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { UsersService } from '../users/users.service';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
 import { TokenService } from './token.service';
+import { hashToken } from './helpers/hash-token';
 
 export type TokenPair = {
   access_token: string;
   refresh_token: string;
 };
-
-function hashToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
-}
 
 @Injectable()
 export class AuthService {
@@ -21,6 +17,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly refreshTokensRepository: RefreshTokensRepository,
     private readonly tokenService: TokenService,
+    private readonly passwordService: PasswordService,
   ) {}
 
   async register(dto: CreateUserDto): Promise<TokenPair> {
@@ -32,11 +29,14 @@ export class AuthService {
   async login(login: string, password: string): Promise<TokenPair> {
     const user = await this.usersService.findAuthInfoByLogin(login);
 
-    if (!user || !user.password_hash.startsWith('$argon2id$')) {
+    if (!user) {
       throw new UnauthorizedException('Неверный логин или пароль');
     }
 
-    const isValidPassword = await argon2.verify(user.password_hash, password);
+    const isValidPassword = await this.passwordService.verify(
+      user.password_hash,
+      password,
+    );
 
     if (!isValidPassword) {
       throw new UnauthorizedException('Неверный логин или пароль');

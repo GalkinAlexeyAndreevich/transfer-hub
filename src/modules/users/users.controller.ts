@@ -9,7 +9,6 @@ import {
   Req,
   Query,
   ParseIntPipe,
-  ForbiddenException,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
@@ -51,11 +50,7 @@ export class UsersController {
     @Req() request: AuthenticatedRequest,
     @Body({ schema: updateUserSchema }) dto: UpdateUserDto,
   ) {
-    if (request.user.id !== id) {
-      throw new ForbiddenException('Нельзя изменять чужой профиль');
-    }
-
-    return this.usersService.update(+id, dto);
+    return this.usersService.update(id, dto, request.user.id);
   }
 
   @Delete(':id')
@@ -64,10 +59,6 @@ export class UsersController {
     @Param('id', ParseIntPipe) id: number,
     @Req() request: AuthenticatedRequest,
   ) {
-    if (request.user.id !== id) {
-      throw new ForbiddenException('Нельзя удалять чужой профиль');
-    }
-
-    return this.usersService.remove(+id);
+    return this.usersService.remove(id, request.user.id);
   }
 }

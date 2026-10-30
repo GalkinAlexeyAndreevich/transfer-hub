@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -6,16 +7,17 @@ import {
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
-import * as argon2 from 'argon2';
 import type { FindUsersQueryDto } from './dto/find-users.dto';
+import { PasswordService } from 'src/common/password/password.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly userRepository: UsersRepository) {}
+  constructor(
+    private readonly userRepository: UsersRepository,
+    private readonly passwordService: PasswordService,
+  ) {}
   async create(dto: CreateUserDto) {
-    const passwordHash = await argon2.hash(dto.password, {
-      type: argon2.argon2id,
-    });
+    const passwordHash = await this.passwordService.hash(dto.password);
 
     return this.userRepository.create({
       login: dto.login,
@@ -72,7 +74,11 @@ export class UsersService {
     return user;
   }
 
-  async update(id: number, dto: UpdateUserDto) {
+  async update(id: number, dto: UpdateUserDto, initiatorId: number) {
+    if (initiatorId !== id) {
+      throw new ForbiddenException('Нельзя изменять чужой профиль');
+    }
+
     const user = await this.userRepository.update(id, dto);
 
     if (!user) {
@@ -82,7 +88,11 @@ export class UsersService {
     return user;
   }
 
-  async remove(id: number) {
+  async remove(id: number, initiatorId: number) {
+    if (initiatorId !== id) {
+      throw new ForbiddenException('Нельзя удалять чужой профиль');
+    }
+
     const user = await this.userRepository.remove(id);
 
     if (!user) {

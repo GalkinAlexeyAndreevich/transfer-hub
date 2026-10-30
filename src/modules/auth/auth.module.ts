@@ -4,9 +4,10 @@ import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
 import { TokenModule } from './token.module';
+import { PasswordService } from 'src/common/password/password.service';
 
 @Module({
-  imports: [UsersModule, TokenModule],
+  imports: [UsersModule, TokenModule, PasswordService],
   controllers: [AuthController],
   providers: [AuthService, RefreshTokensRepository],
 })
