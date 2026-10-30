@@ -13,9 +13,6 @@ export type VerifiedToken = {
 
 export type TokenPayload = Record<string, unknown>;
 
-const ACCESS_TTL_SECONDS = 15 * 60;
-const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60;
-
 @Injectable()
 export class TokenService {
   constructor(
@@ -26,7 +23,7 @@ export class TokenService {
 
   async generateTokens(userId: number) {
     const now = Math.floor(Date.now() / 1000);
-    const refreshExp = now + REFRESH_TTL_SECONDS;
+    const refreshExp = now + this.config.REFRESH_TTL_SECONDS;
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(
@@ -39,7 +36,7 @@ export class TokenService {
         {
           secret: this.config.JWT_SECRET,
           algorithm: 'HS256',
-          expiresIn: ACCESS_TTL_SECONDS,
+          expiresIn: this.config.ACCESS_TTL_SECONDS,
         },
       ),
       this.jwt.signAsync(

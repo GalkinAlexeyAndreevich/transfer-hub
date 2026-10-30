@@ -8,6 +8,7 @@ export interface Database {
     password_hash: string;
     birth_date: ColumnType<Date, string, string>;
     about: string | null;
+    deleted_at: ColumnType<Date | null>;
   };
 
   refresh_tokens: {

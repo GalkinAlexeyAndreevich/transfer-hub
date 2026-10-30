@@ -1,3 +1,4 @@
+import { UsersService } from './../users/users.service';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { Request } from 'express';
@@ -14,7 +15,10 @@ export type AuthenticatedRequest = Request & {
 
 @Injectable()
 export class AccessTokenGuard implements CanActivate {
-  constructor(private readonly tokenService: TokenService) {}
+  constructor(
+    private readonly tokenService: TokenService,
+    private readonly usersService: UsersService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -27,6 +31,12 @@ export class AccessTokenGuard implements CanActivate {
     }
 
     const { userId, jti } = await this.tokenService.verifyAccessToken(token);
+
+    const user = await this.usersService.findOne(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('Пользователя не существует');
+    }
 
     request.user = {
       id: userId,

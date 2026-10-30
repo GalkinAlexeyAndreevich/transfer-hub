@@ -53,6 +53,12 @@ export class AuthService {
   async refreshTokens(refreshToken: string): Promise<TokenPair> {
     const { userId } = await this.tokenService.verifyRefreshToken(refreshToken);
 
+    const user = await this.usersService.findOne(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('Пользователь не существует');
+    }
+
     const { tokens, refreshExpiresAt } =
       await this.tokenService.generateTokens(userId);
 
@@ -77,11 +83,15 @@ export class AuthService {
     const { tokens, refreshExpiresAt } =
       await this.tokenService.generateTokens(userId);
 
-    await this.refreshTokensRepository.create(
+    const created = await this.refreshTokensRepository.create(
       userId,
       hashToken(tokens.refresh_token),
       refreshExpiresAt,
     );
+
+    if (!created) {
+      throw new UnauthorizedException('Пользователь не существует');
+    }
 
     return tokens;
   }

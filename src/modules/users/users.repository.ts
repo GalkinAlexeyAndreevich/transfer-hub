@@ -4,7 +4,9 @@ import { DatabaseService } from '../../database/database.service';
 import type { Database } from '../../database/database.types';
 
 type NewUser = Insertable<Database['users']>;
-type UserChanges = Updateable<Omit<Database['users'], 'id'>>;
+type UserChanges = Updateable<
+  Omit<Database['users'], 'id' | 'password_hash' | 'deleted_at'>
+>;
 
 const publicFields = ['id', 'login', 'email', 'birth_date', 'about'] as const;
 
@@ -27,7 +29,9 @@ export class UsersRepository {
   }
 
   async findAll({ limit, offset, login }: FindUsersParams) {
-    let query = this.database.db.selectFrom('users');
+    let query = this.database.db
+      .selectFrom('users')
+      .where('deleted_at', 'is', null);
 
     if (login) {
       const escapedLogin = login.replace(/[\\%_]/g, '\\$&'); // экранирование для запроса
@@ -59,6 +63,7 @@ export class UsersRepository {
       .selectFrom('users')
       .select(publicFields)
       .where('id', '=', id)
+      .where('deleted_at', 'is', null)
       .executeTakeFirst();
   }
 
@@ -67,6 +72,7 @@ export class UsersRepository {
       .selectFrom('users')
       .select(['id', 'password_hash'])
       .where('login', '=', login)
+      .where('deleted_at', 'is', null)
       .executeTakeFirst();
   }
 
@@ -75,15 +81,31 @@ export class UsersRepository {
       .updateTable('users')
       .set(data)
       .where('id', '=', id)
+      .where('deleted_at', 'is', null)
       .returning(publicFields)
       .executeTakeFirst();
   }
 
   remove(id: number) {
-    return this.database.db
-      .deleteFrom('users')
-      .where('id', '=', id)
-      .returning('id')
-      .executeTakeFirst();
+    return this.database.db.transaction().execute(async (trx) => {
+      const user = await trx
+        .updateTable('users')
+        .set({ deleted_at: new Date() })
+        .where('id', '=', id)
+        .where('deleted_at', 'is', null)
+        .returning('id')
+        .executeTakeFirst();
+
+      if (!user) {
+        return undefined;
+      }
+
+      await trx
+        .deleteFrom('refresh_tokens')
+        .where('user_id', '=', id)
+        .execute();
+
+      return user;
+    });
   }
 }

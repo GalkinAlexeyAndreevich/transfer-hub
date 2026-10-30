@@ -8,6 +8,9 @@ import {
   UseGuards,
   Req,
   Query,
+  ParseIntPipe,
+  ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
@@ -37,22 +40,41 @@ export class UsersController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(+id);
+  @UseGuards(AccessTokenGuard)
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const user = await this.usersService.findOne(id);
+
+    if (!user) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return user;
   }
 
   @Patch(':id')
   @UseGuards(AccessTokenGuard)
   update(
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
     @Body({ schema: updateUserSchema }) dto: UpdateUserDto,
   ) {
+    if (request.user.id !== id) {
+      throw new ForbiddenException('Нельзя изменять чужой профиль');
+    }
+
     return this.usersService.update(+id, dto);
   }
 
   @Delete(':id')
   @UseGuards(AccessTokenGuard)
-  remove(@Param('id') id: string) {
+  remove(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    if (request.user.id !== id) {
+      throw new ForbiddenException('Нельзя удалять чужой профиль');
+    }
+
     return this.usersService.remove(+id);
   }
 }

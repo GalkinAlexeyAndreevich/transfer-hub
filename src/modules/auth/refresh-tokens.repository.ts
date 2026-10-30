@@ -7,14 +7,30 @@ export class RefreshTokensRepository {
   constructor(private readonly database: DatabaseService) {}
 
   create(userId: number, tokenHash: string, expiresAt: Date) {
-    return this.database.db
-      .insertInto('refresh_tokens')
-      .values({
-        user_id: userId,
-        token_hash: tokenHash,
-        expires_at: expiresAt,
-      })
-      .execute();
+    return this.database.db.transaction().execute(async (trx) => {
+      const user = await trx
+        .selectFrom('users')
+        .select('id')
+        .where('id', '=', userId)
+        .where('deleted_at', 'is', null)
+        .forUpdate()
+        .executeTakeFirst();
+
+      if (!user) {
+        return false;
+      }
+
+      await trx
+        .insertInto('refresh_tokens')
+        .values({
+          user_id: userId,
+          token_hash: tokenHash,
+          expires_at: expiresAt,
+        })
+        .execute();
+
+      return true;
+    });
   }
 
   removeByHash(tokenHash: string) {
