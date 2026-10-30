@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import type { Insertable, Updateable } from 'kysely';
 import { DatabaseService } from '../../database/database.service';
 import type { Database } from '../../database/database.types';
+import { DatabaseError } from 'pg';
 
 type NewUser = Insertable<Database['users']>;
 type UserChanges = Updateable<
@@ -20,12 +21,16 @@ type FindUsersParams = {
 export class UsersRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  create(data: NewUser) {
-    return this.database.db
-      .insertInto('users')
-      .values(data)
-      .returning(publicFields)
-      .executeTakeFirstOrThrow();
+  async create(data: NewUser) {
+    try {
+      return await this.database.db
+        .insertInto('users')
+        .values(data)
+        .returning(publicFields)
+        .executeTakeFirstOrThrow();
+    } catch (error: unknown) {
+      this.uniqueUserError(error);
+    }
   }
 
   async findAll({ limit, offset, login }: FindUsersParams) {
@@ -76,14 +81,18 @@ export class UsersRepository {
       .executeTakeFirst();
   }
 
-  update(id: number, data: UserChanges) {
-    return this.database.db
-      .updateTable('users')
-      .set(data)
-      .where('id', '=', id)
-      .where('deleted_at', 'is', null)
-      .returning(publicFields)
-      .executeTakeFirst();
+  async update(id: number, data: UserChanges) {
+    try {
+      return await this.database.db
+        .updateTable('users')
+        .set(data)
+        .where('id', '=', id)
+        .where('deleted_at', 'is', null)
+        .returning(publicFields)
+        .executeTakeFirst();
+    } catch (error: unknown) {
+      this.uniqueUserError(error);
+    }
   }
 
   remove(id: number) {
@@ -107,5 +116,15 @@ export class UsersRepository {
 
       return user;
     });
+  }
+
+  private uniqueUserError(error: unknown): never {
+    if (error instanceof DatabaseError && error.code === '23505') {
+      throw new ConflictException(
+        'Пользователь с таким email или login уже существует',
+      );
+    }
+
+    throw error;
   }
 }

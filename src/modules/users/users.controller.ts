@@ -10,7 +10,6 @@ import {
   Query,
   ParseIntPipe,
   ForbiddenException,
-  NotFoundException,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
@@ -41,14 +40,8 @@ export class UsersController {
 
   @Get(':id')
   @UseGuards(AccessTokenGuard)
-  async findOne(@Param('id', ParseIntPipe) id: number) {
-    const user = await this.usersService.findOne(id);
-
-    if (!user) {
-      throw new NotFoundException('Пользователь не найден');
-    }
-
-    return user;
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.findOneOrThrow(id);
   }
 
   @Patch(':id')

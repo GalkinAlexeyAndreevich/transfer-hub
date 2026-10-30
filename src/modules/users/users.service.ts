@@ -1,6 +1,6 @@
 import {
-  ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -17,28 +17,13 @@ export class UsersService {
       type: argon2.argon2id,
     });
 
-    try {
-      return await this.userRepository.create({
-        login: dto.login,
-        email: dto.email,
-        password_hash: passwordHash,
-        birth_date: dto.birth_date,
-        about: dto.about ?? null,
-      });
-    } catch (error) {
-      if (
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        error.code === '23505'
-      ) {
-        throw new ConflictException(
-          'Пользователь с таким email или login уже существует',
-        );
-      }
-
-      throw error;
-    }
+    return this.userRepository.create({
+      login: dto.login,
+      email: dto.email,
+      password_hash: passwordHash,
+      birth_date: dto.birth_date,
+      about: dto.about ?? null,
+    });
   }
 
   findAuthInfoByLogin(login: string) {
@@ -67,6 +52,16 @@ export class UsersService {
     return this.userRepository.findOne(id);
   }
 
+  async findOneOrThrow(id: number) {
+    const user = await this.findOne(id);
+
+    if (!user) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return user;
+  }
+
   async me(id: number) {
     const user = await this.findOne(id);
 
@@ -77,11 +72,23 @@ export class UsersService {
     return user;
   }
 
-  update(id: number, updateUserDto: UpdateUserDto) {
-    return this.userRepository.update(id, updateUserDto);
+  async update(id: number, dto: UpdateUserDto) {
+    const user = await this.userRepository.update(id, dto);
+
+    if (!user) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return user;
   }
 
-  remove(id: number) {
-    return this.userRepository.remove(id);
+  async remove(id: number) {
+    const user = await this.userRepository.remove(id);
+
+    if (!user) {
+      throw new NotFoundException('Пользователь не найден');
+    }
+
+    return user;
   }
 }
