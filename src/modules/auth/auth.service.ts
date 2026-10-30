@@ -1,5 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import bcrypt from 'bcrypt';
+import * as argon2 from 'argon2';
 import { createHash } from 'node:crypto';
 import { CreateUserDto } from '../users/dto/create-user.dto';
 import { UsersService } from '../users/users.service';
@@ -32,12 +32,11 @@ export class AuthService {
   async login(login: string, password: string): Promise<TokenPair> {
     const user = await this.usersService.findAuthInfoByLogin(login);
 
-    if (!user) {
+    if (!user || !user.password_hash.startsWith('$argon2id$')) {
       throw new UnauthorizedException('Неверный логин или пароль');
     }
 
-    // TODO: Заменить на argon
-    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    const isValidPassword = await argon2.verify(user.password_hash, password);
 
     if (!isValidPassword) {
       throw new UnauthorizedException('Неверный логин или пароль');

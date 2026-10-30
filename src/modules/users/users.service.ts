@@ -6,17 +6,16 @@ import {
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
-import bcrypt from 'bcrypt';
+import * as argon2 from 'argon2';
 import type { FindUsersQueryDto } from './dto/find-users.dto';
-
-const BCRYPT_HASH_ROUNDS = 10;
 
 @Injectable()
 export class UsersService {
   constructor(private readonly userRepository: UsersRepository) {}
   async create(dto: CreateUserDto) {
-    // TODO: заменить на argon
-    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_HASH_ROUNDS);
+    const passwordHash = await argon2.hash(dto.password, {
+      type: argon2.argon2id,
+    });
 
     try {
       return await this.userRepository.create({
