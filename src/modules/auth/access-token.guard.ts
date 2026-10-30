@@ -1,7 +1,7 @@
 import { UsersService } from './../users/users.service';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
-import type { Request } from 'express';
+import type { FastifyRequest } from 'fastify';
 import { TokenService } from './token.service';
 
 export type AuthUser = {
@@ -9,7 +9,7 @@ export type AuthUser = {
   jti: string;
 };
 
-export type AuthenticatedRequest = Request & {
+export type AuthenticatedRequest = FastifyRequest & {
   user: AuthUser;
 };
 

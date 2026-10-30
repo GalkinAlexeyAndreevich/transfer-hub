@@ -1,11 +1,18 @@
 import { StandardSchemaValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import {
+  FastifyAdapter,
+  type NestFastifyApplication,
+} from '@nestjs/platform-fastify';
 import type { ConfigType } from '@nestjs/config';
 import { AppModule } from './app.module';
 import appConfig from './config/app.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter(),
+  );
   const config = app.get<ConfigType<typeof appConfig>>(appConfig.KEY);
   app.enableShutdownHooks();
   app.useGlobalPipes(new StandardSchemaValidationPipe());

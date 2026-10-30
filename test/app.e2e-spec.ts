@@ -1,29 +1,34 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
-import { App } from 'supertest/types';
+import { StandardSchemaValidationPipe } from '@nestjs/common';
+import {
+  FastifyAdapter,
+  type NestFastifyApplication,
+} from '@nestjs/platform-fastify';
 import { AppModule } from './../src/app.module';
 
 describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: NestFastifyApplication;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    const adapter = new FastifyAdapter();
+    app = moduleFixture.createNestApplication<NestFastifyApplication>(adapter);
+    app.useGlobalPipes(new StandardSchemaValidationPipe());
     await app.init();
+    await adapter.getInstance().ready();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  it('/ (GET)', async () => {
+    const response = await app.inject({ method: 'GET', url: '/' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe('Hello World!');
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await app.close();
   });
 });
