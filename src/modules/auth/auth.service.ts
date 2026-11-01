@@ -5,6 +5,7 @@ import { UsersService } from '../users/users.service';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
 import { TokenService } from './token.service';
 import { hashToken } from './helpers/hash-token';
+import { AUTH_MESSAGES } from './constants/messages';
 
 export type TokenPair = {
   access_token: string;
@@ -30,7 +31,7 @@ export class AuthService {
     const user = await this.usersService.findAuthInfoByLogin(login);
 
     if (!user) {
-      throw new UnauthorizedException('Неверный логин или пароль');
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     const isValidPassword = await this.passwordService.verify(
@@ -39,7 +40,7 @@ export class AuthService {
     );
 
     if (!isValidPassword) {
-      throw new UnauthorizedException('Неверный логин или пароль');
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     return this.startSession(user.id);
@@ -55,7 +56,7 @@ export class AuthService {
     const user = await this.usersService.findOne(userId);
 
     if (!user) {
-      throw new UnauthorizedException('Пользователь не существует');
+      throw new UnauthorizedException(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
     const { tokens, refreshExpiresAt } =
@@ -71,7 +72,7 @@ export class AuthService {
     if (!rotated) {
       throw new UnauthorizedException({
         code: 'REFRESH_TOKEN_INACTIVE',
-        message: 'Refresh token больше не активен',
+        message: AUTH_MESSAGES.SESSION_EXPIRED,
       });
     }
 

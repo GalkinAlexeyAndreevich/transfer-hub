@@ -7,6 +7,7 @@ import {
 import type { ConfigType } from '@nestjs/config';
 import { AppModule } from './app.module';
 import appConfig from './config/app.config';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -16,6 +17,19 @@ async function bootstrap() {
   const config = app.get<ConfigType<typeof appConfig>>(appConfig.KEY);
   app.enableShutdownHooks();
   app.useGlobalPipes(new StandardSchemaValidationPipe());
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Transfer Hub API')
+    .setDescription('API пользователей и авторизации')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+
+  const documentFactory = () =>
+    SwaggerModule.createDocument(app, swaggerConfig);
+
+  SwaggerModule.setup('docs', app, documentFactory);
+
   await app.listen(config.port);
 }
 

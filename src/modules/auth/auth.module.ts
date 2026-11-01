@@ -7,8 +7,8 @@ import { TokenModule } from './token.module';
 import { PasswordService } from 'src/common/password/password.service';
 
 @Module({
-  imports: [UsersModule, TokenModule, PasswordService],
+  imports: [UsersModule, TokenModule],
   controllers: [AuthController],
-  providers: [AuthService, RefreshTokensRepository],
+  providers: [AuthService, RefreshTokensRepository, PasswordService],
 })
 export class AuthModule {}

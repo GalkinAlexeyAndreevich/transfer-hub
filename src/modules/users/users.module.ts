@@ -8,9 +8,9 @@ import { AccessTokenGuard } from '../auth/access-token.guard';
 import { PasswordService } from 'src/common/password/password.service';
 
 @Module({
-  imports: [DatabaseModule, TokenModule, PasswordService],
+  imports: [DatabaseModule, TokenModule],
   controllers: [UsersController],
-  providers: [UsersService, UsersRepository, AccessTokenGuard],
+  providers: [UsersService, UsersRepository, AccessTokenGuard, PasswordService],
   exports: [UsersService, AccessTokenGuard],
 })
 export class UsersModule {}

@@ -6,16 +6,35 @@ import {
   refreshTokenSchema,
   type RefreshTokenDto,
 } from './dto/refresh-token.dto';
+import {
+  ApiCreatedResponse,
+  ApiOperation,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
+  @ApiOperation({
+    summary: 'Регистрация аккаунта',
+    description:
+      'Создаёт пользователя и сразу открывает сессию: ' +
+      'возвращает access_token и refresh_token.',
+  })
   register(@Body({ schema: registerSchema }) dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
+  @ApiOperation({
+    summary: 'Вход в аккаунт',
+    description: 'Проверяет логин и пароль и возвращает пару токенов.',
+  })
+  @ApiCreatedResponse({ description: 'Вход выполнен, токены выданы' })
+  @ApiUnauthorizedResponse({ description: 'Неверный логин или пароль' })
   @Post('login')
   login(@Body({ schema: loginSchema }) dto: LoginDto) {
     return this.authService.login(dto.login, dto.password);
