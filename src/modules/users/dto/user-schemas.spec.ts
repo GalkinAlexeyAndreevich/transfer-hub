@@ -1,4 +1,7 @@
+import { StandardSchemaValidationPipe } from '@nestjs/common';
+import { loginSchema } from '@/modules/auth/dto/login.dto';
 import { createUserSchema } from './create-user.dto';
+import { findUsersQuerySchema } from './find-users.dto';
 import { updateUserSchema } from './update-user.dto';
 
 describe('User schemas', () => {
@@ -71,5 +74,83 @@ describe('User schemas', () => {
 
   it('отклоняет пустое обновление', () => {
     expect(updateUserSchema.safeParse({}).success).toBe(false);
+  });
+
+  it.each([
+    [
+      'логин при регистрации',
+      createUserSchema,
+      { ...validUser, login: 'alex\u0000ey' },
+      'login',
+      'body',
+    ],
+    [
+      'описание при регистрации',
+      createUserSchema,
+      { ...validUser, description: 'О\u0000себе' },
+      'description',
+      'body',
+    ],
+    [
+      'логин при входе',
+      loginSchema,
+      { login: 'alex\u0000ey', password: validUser.password },
+      'login',
+      'body',
+    ],
+    [
+      'описание при обновлении',
+      updateUserSchema,
+      { description: 'О\u0000себе' },
+      'description',
+      'body',
+    ],
+    [
+      'логин при обновлении',
+      updateUserSchema,
+      { login: 'alex\u0000ey' },
+      'login',
+      'body',
+    ],
+    [
+      'поисковую строку',
+      findUsersQuerySchema,
+      { login: 'alex\u0000ey' },
+      'login',
+      'query',
+    ],
+  ] as const)(
+    'отклоняет %s с U+0000: 400 с названием поля',
+    async (_name, schema, value, field, type) => {
+      const pipe = new StandardSchemaValidationPipe();
+
+      await expect(
+        pipe.transform(value, { type, schema }),
+      ).rejects.toMatchObject({
+        response: {
+          statusCode: 400,
+          message: [expect.stringContaining(`${field}:`)],
+        },
+      });
+    },
+  );
+
+  it('разрешает многострочное описание', () => {
+    const description = 'Первая строка\nВторая строка';
+
+    expect(
+      createUserSchema.parse({ ...validUser, description }).description,
+    ).toBe(description);
+  });
+
+  it('сохраняет пароль дословно при регистрации и входе', () => {
+    const password = ' Example\u0000Password123! ';
+
+    expect(createUserSchema.parse({ ...validUser, password }).password).toBe(
+      password,
+    );
+    expect(
+      loginSchema.parse({ login: validUser.login, password }).password,
+    ).toBe(password);
   });
 });

@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { textSchema } from '@/common/schemas/text.schema';
 
 export const createUserSchema = z.strictObject({
-  login: z.string().trim().min(1).max(50).meta({
+  login: textSchema.trim().min(1).max(50).meta({
     description: 'Логин пользователя',
     example: 'alexey',
   }),
@@ -21,7 +22,7 @@ export const createUserSchema = z.strictObject({
     example: '22',
   }),
 
-  description: z.string().max(1000).nullish().meta({
+  description: textSchema.max(1000).nullish().meta({
     description: 'О себе. Можно не передавать или указать null',
     example: 'Я продаю бананы, людей. Шучу, не бананы',
   }),
