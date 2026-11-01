@@ -8,8 +8,8 @@ import {
   UseGuards,
   Req,
   Query,
-  ParseIntPipe,
 } from '@nestjs/common';
+import { idSchema } from '@/common/schemas/id.schema';
 import { UsersService } from './users.service';
 import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import {
@@ -43,7 +43,7 @@ export class UsersController {
   @Get(':id')
   @UseGuards(AccessTokenGuard)
   @ApiBearerAuth()
-  findOne(@Param('id', ParseIntPipe) id: number) {
+  findOne(@Param('id', { schema: idSchema }) id: number) {
     return this.usersService.findOneOrThrow(id);
   }
 
@@ -51,7 +51,7 @@ export class UsersController {
   @UseGuards(AccessTokenGuard)
   @ApiBearerAuth()
   update(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', { schema: idSchema }) id: number,
     @Req() request: AuthenticatedRequest,
     @Body({ schema: updateUserSchema }) dto: UpdateUserDto,
   ) {
@@ -62,7 +62,7 @@ export class UsersController {
   @UseGuards(AccessTokenGuard)
   @ApiBearerAuth()
   remove(
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', { schema: idSchema }) id: number,
     @Req() request: AuthenticatedRequest,
   ) {
     return this.usersService.remove(id, request.user.id);

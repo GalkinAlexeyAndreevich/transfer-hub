@@ -10,6 +10,15 @@ $ npm install
 
 Copy `.env.example` to `.env`.
 
+Generate two independent JWT secrets:
+
+```bash
+node -e "const {randomBytes}=require('node:crypto'); for (const name of ['JWT_SECRET','JWT_REFRESH_SECRET']) console.log(name+'='+randomBytes(32).toString('hex'))"
+```
+
+Paste the generated lines into `.env`, replacing `JWT_SECRET` and
+`JWT_REFRESH_SECRET`. The jwt in .env and .env.example should be different.
+
 ### Start PostgreSQL
 
 ```bash
