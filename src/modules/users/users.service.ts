@@ -23,8 +23,8 @@ export class UsersService {
       login: dto.login,
       email: dto.email,
       password_hash: passwordHash,
-      birth_date: dto.birth_date,
-      about: dto.about ?? null,
+      age: dto.age,
+      description: dto.description ?? null,
     });
   }
 

@@ -5,8 +5,8 @@ export const updateUserSchema = createUserSchema
   .pick({
     login: true,
     email: true,
-    birth_date: true,
-    about: true,
+    age: true,
+    description: true,
   })
   .partial()
   .refine((dto) => Object.values(dto).some((value) => value !== undefined), {

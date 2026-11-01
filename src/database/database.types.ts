@@ -6,8 +6,8 @@ export interface Database {
     login: string;
     email: string;
     password_hash: string;
-    birth_date: ColumnType<Date, string, string>;
-    about: string | null;
+    age: number;
+    description: string | null;
     deleted_at: ColumnType<Date | null>;
   };
 

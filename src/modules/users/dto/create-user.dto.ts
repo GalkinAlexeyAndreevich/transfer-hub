@@ -16,12 +16,12 @@ export const createUserSchema = z.strictObject({
     example: 'ExamplePassword123!',
   }),
 
-  birth_date: z.iso.date().meta({
-    description: 'Дата рождения в формате YYYY-MM-DD',
-    example: '1998-05-21',
+  age: z.number().int().min(0).max(150).meta({
+    description: 'Возраст',
+    example: '22',
   }),
 
-  about: z.string().max(1000).nullish().meta({
+  description: z.string().max(1000).nullish().meta({
     description: 'О себе. Можно не передавать или указать null',
     example: 'Я продаю бананы, людей. Шучу, не бананы',
   }),

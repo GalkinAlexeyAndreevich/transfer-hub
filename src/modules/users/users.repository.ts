@@ -9,7 +9,7 @@ type UserChanges = Updateable<
   Omit<Database['users'], 'id' | 'password_hash' | 'deleted_at'>
 >;
 
-const publicFields = ['id', 'login', 'email', 'birth_date', 'about'] as const;
+const publicFields = ['id', 'login', 'email', 'age', 'description'] as const;
 
 type FindUsersParams = {
   limit: number;
