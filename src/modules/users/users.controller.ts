@@ -15,7 +15,7 @@ import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto';
 import {
   AccessTokenGuard,
   type AuthenticatedRequest,
-} from '../auth/access-token.guard';
+} from '@/modules/auth/access-token.guard';
 import {
   findUsersQuerySchema,
   type FindUsersQueryDto,

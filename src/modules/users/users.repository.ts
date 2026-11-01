@@ -1,7 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import type { Insertable, Updateable } from 'kysely';
-import { DatabaseService } from '../../database/database.service';
-import type { Database } from '../../database/database.types';
+import { DatabaseService } from '@/database/database.service';
+import type { Database } from '@/database/database.types';
 import { DatabaseError } from 'pg';
 
 type NewUser = Insertable<Database['users']>;

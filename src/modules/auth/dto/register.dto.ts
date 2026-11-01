@@ -1,7 +1,7 @@
 import {
   createUserSchema,
   type CreateUserDto,
-} from '../../users/dto/create-user.dto';
+} from '@/modules/users/dto/create-user.dto';
 
 export const registerSchema = createUserSchema;
 

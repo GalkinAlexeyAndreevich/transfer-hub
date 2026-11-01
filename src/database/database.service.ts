@@ -3,7 +3,7 @@ import type { ConfigType } from '@nestjs/config';
 import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import type { Database } from './database.types';
-import databaseConfig from '../config/database.config';
+import databaseConfig from '@/config/database.config';
 
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {

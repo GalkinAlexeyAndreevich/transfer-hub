@@ -1,7 +1,7 @@
-import { PasswordService } from 'src/common/password/password.service';
+import { PasswordService } from '@/common/password/password.service';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { CreateUserDto } from '../users/dto/create-user.dto';
-import { UsersService } from '../users/users.service';
+import { CreateUserDto } from '@/modules/users/dto/create-user.dto';
+import { UsersService } from '@/modules/users/users.service';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
 import { TokenService } from './token.service';
 import { hashToken } from './helpers/hash-token';

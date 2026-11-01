@@ -8,7 +8,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
 import type { FindUsersQueryDto } from './dto/find-users.dto';
-import { PasswordService } from 'src/common/password/password.service';
+import { PasswordService } from '@/common/password/password.service';
 
 @Injectable()
 export class UsersService {

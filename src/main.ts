@@ -6,7 +6,7 @@ import {
 } from '@nestjs/platform-fastify';
 import type { ConfigType } from '@nestjs/config';
 import { AppModule } from './app.module';
-import appConfig from './config/app.config';
+import appConfig from '@/config/app.config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {

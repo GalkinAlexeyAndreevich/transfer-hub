@@ -2,10 +2,10 @@ import { Module } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { UsersRepository } from './users.repository';
 import { UsersController } from './users.controller';
-import { DatabaseModule } from '../../database/database.module';
-import { TokenModule } from '../auth/token.module';
-import { AccessTokenGuard } from '../auth/access-token.guard';
-import { PasswordService } from 'src/common/password/password.service';
+import { DatabaseModule } from '@/database/database.module';
+import { TokenModule } from '@/modules/auth/token.module';
+import { AccessTokenGuard } from '@/modules/auth/access-token.guard';
+import { PasswordService } from '@/common/password/password.service';
 
 @Module({
   imports: [DatabaseModule, TokenModule],
