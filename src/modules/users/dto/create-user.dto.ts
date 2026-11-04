@@ -19,7 +19,7 @@ export const createUserSchema = z.strictObject({
 
   age: z.number().int().min(0).max(150).meta({
     description: 'Возраст',
-    example: '22',
+    example: 22,
   }),
 
   description: textSchema.max(1000).nullish().meta({
