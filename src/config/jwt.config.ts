@@ -1,0 +1,17 @@
+import { registerAs } from '@nestjs/config';
+import { z } from 'zod';
+import { validateEnv } from './validate-env';
+
+const schema = z
+  .object({
+    JWT_SECRET: z.string().min(32),
+    JWT_REFRESH_SECRET: z.string().min(32),
+    ACCESS_TTL_SECONDS: z.coerce.number().int().min(1),
+    REFRESH_TTL_SECONDS: z.coerce.number().int().min(1),
+  })
+  .refine((env) => env.JWT_SECRET !== env.JWT_REFRESH_SECRET, {
+    error: 'Access и refresh должны иметь разные секреты',
+    path: ['JWT_REFRESH_SECRET'],
+  });
+
+export default registerAs('jwt', () => validateEnv(schema, process.env));
