@@ -90,7 +90,6 @@ describe('UsersController: валидация ID', () => {
       service.findOneOrThrow.mockResolvedValue({
         id,
         login: 'test',
-        email: 'test@example.com',
         age: 25,
         description: null,
       });

@@ -47,11 +47,15 @@ export class AuthService {
   }
 
   async logout(refreshToken: string): Promise<void> {
-    await this.refreshTokensRepository.removeByHash(hashToken(refreshToken));
+    const { userId, sessionId } =
+      await this.tokenService.verifyRefreshToken(refreshToken);
+
+    await this.refreshTokensRepository.removeSession(userId, sessionId);
   }
 
   async refreshTokens(refreshToken: string): Promise<TokenPair> {
-    const { userId } = await this.tokenService.verifyRefreshToken(refreshToken);
+    const { userId, sessionId } =
+      await this.tokenService.verifyRefreshToken(refreshToken);
 
     const user = await this.usersService.findOne(userId);
 
@@ -59,15 +63,18 @@ export class AuthService {
       throw new UnauthorizedException(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
-    const { tokens, refreshExpiresAt } =
-      await this.tokenService.generateTokens(userId);
-
-    const rotated = await this.refreshTokensRepository.rotate(
-      hashToken(refreshToken),
+    const { tokens, refreshExpiresAt } = await this.tokenService.generateTokens(
       userId,
-      hashToken(tokens.refresh_token),
-      refreshExpiresAt,
+      sessionId,
     );
+
+    const rotated = await this.refreshTokensRepository.rotate({
+      userId,
+      sessionId,
+      oldHash: hashToken(refreshToken),
+      newHash: hashToken(tokens.refresh_token),
+      expiresAt: refreshExpiresAt,
+    });
 
     if (!rotated) {
       throw new UnauthorizedException({
@@ -80,14 +87,15 @@ export class AuthService {
   }
 
   private async startSession(userId: number): Promise<TokenPair> {
-    const { tokens, refreshExpiresAt } =
+    const { tokens, refreshExpiresAt, sessionId } =
       await this.tokenService.generateTokens(userId);
 
-    const created = await this.refreshTokensRepository.create(
+    const created = await this.refreshTokensRepository.create({
       userId,
-      hashToken(tokens.refresh_token),
-      refreshExpiresAt,
-    );
+      sessionId,
+      tokenHash: hashToken(tokens.refresh_token),
+      expiresAt: refreshExpiresAt,
+    });
 
     if (!created) {
       throw new UnauthorizedException('Пользователь не существует');

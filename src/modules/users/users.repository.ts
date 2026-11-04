@@ -9,7 +9,8 @@ type UserChanges = Updateable<
   Omit<Database['users'], 'id' | 'password_hash' | 'deleted_at'>
 >;
 
-const publicFields = ['id', 'login', 'email', 'age', 'description'] as const;
+const publicFields = ['id', 'login', 'age', 'description'] as const;
+const profileFields = [...publicFields, 'email'] as const;
 
 type FindUsersParams = {
   limit: number;
@@ -67,6 +68,15 @@ export class UsersRepository {
     return this.database.db
       .selectFrom('users')
       .select(publicFields)
+      .where('id', '=', id)
+      .where('deleted_at', 'is', null)
+      .executeTakeFirst();
+  }
+
+  findProfile(id: number) {
+    return this.database.db
+      .selectFrom('users')
+      .select(profileFields)
       .where('id', '=', id)
       .where('deleted_at', 'is', null)
       .executeTakeFirst();

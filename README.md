@@ -30,7 +30,6 @@ $ docker compose up
 ```bash
 npx kysely migrate latest
 ```
-
 ### Start the application
 
 ```bash
@@ -44,6 +43,17 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+### Swagger
+
+После запуска приложения открой [Swagger UI](http://localhost:3000/docs).
+Если в `.env` указан другой `PORT`, замени `3000` в адресе на его значение.
+
+Для проверки защищённых маршрутов:
+
+1. Зарегистрируйся через `POST /auth/register` или войди через `POST /auth/login`.
+2. Скопируй `access_token` из ответа.
+3. Нажми **Authorize** в Swagger и вставь токен без префикса `Bearer`.
+
 ## Run tests
 
 ```bash
@@ -53,9 +63,14 @@ $ npm run test
 # e2e tests
 $ npm run test:e2e
 
+# integration tests (PostgreSQL must be running)
+$ npm run test:integration
+
 # test coverage
 $ npm run test:cov
 ```
+
+Интеграционные тесты создают и удаляют отдельную временную схему в БД из `DATABASE_URL`.
 
 ## PostgreSQL commands
 

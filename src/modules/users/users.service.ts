@@ -65,7 +65,7 @@ export class UsersService {
   }
 
   async me(id: number) {
-    const user = await this.findOne(id);
+    const user = await this.userRepository.findProfile(id);
 
     if (!user) {
       throw new UnauthorizedException('Пользователь не найден');

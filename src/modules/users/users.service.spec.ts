@@ -36,7 +36,6 @@ describe('UsersService', () => {
     const user = {
       id: 1,
       login: 'alexey',
-      email: 'alexey@example.com',
       age: 30,
       description: null,
     };

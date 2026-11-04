@@ -12,6 +12,7 @@ export interface Database {
   };
 
   refresh_tokens: {
+    session_id: string;
     token_hash: string;
     user_id: number;
     expires_at: Date;

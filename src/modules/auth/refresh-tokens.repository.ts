@@ -2,11 +2,23 @@ import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '@/database/database.service';
 import { sql } from 'kysely';
 
+type RefreshSession = {
+  userId: number;
+  sessionId: string;
+  tokenHash: string;
+  expiresAt: Date;
+};
+
+type RefreshRotation = Omit<RefreshSession, 'tokenHash'> & {
+  oldHash: string;
+  newHash: string;
+};
+
 @Injectable()
 export class RefreshTokensRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  create(userId: number, tokenHash: string, expiresAt: Date) {
+  create({ userId, sessionId, tokenHash, expiresAt }: RefreshSession) {
     return this.database.db.transaction().execute(async (trx) => {
       const user = await trx
         .selectFrom('users')
@@ -23,6 +35,7 @@ export class RefreshTokensRepository {
       await trx
         .insertInto('refresh_tokens')
         .values({
+          session_id: sessionId,
           user_id: userId,
           token_hash: tokenHash,
           expires_at: expiresAt,
@@ -33,22 +46,24 @@ export class RefreshTokensRepository {
     });
   }
 
-  removeByHash(tokenHash: string) {
+  removeSession(userId: number, sessionId: string) {
     return this.database.db
       .deleteFrom('refresh_tokens')
-      .where('token_hash', '=', tokenHash)
+      .where('session_id', '=', sessionId)
+      .where('user_id', '=', userId)
       .execute();
   }
 
-  rotate(oldHash: string, userId: number, newHash: string, expiresAt: Date) {
+  rotate({ sessionId, userId, oldHash, newHash, expiresAt }: RefreshRotation) {
     return this.database.db
       .updateTable('refresh_tokens')
       .set({
         token_hash: newHash,
         expires_at: expiresAt,
       })
-      .where('token_hash', '=', oldHash)
+      .where('session_id', '=', sessionId)
       .where('user_id', '=', userId)
+      .where('token_hash', '=', oldHash)
       .where('expires_at', '>', sql<Date>`now()`)
       .returning('user_id')
       .executeTakeFirst();
