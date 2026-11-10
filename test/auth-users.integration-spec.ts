@@ -18,6 +18,8 @@ import * as createRefreshTokens from '@/database/migrations/002_create_refresh_t
 import * as addDeletedAt from '@/database/migrations/003_add_users_deleted_at';
 import * as addAgeDescription from '@/database/migrations/004_users_age_description';
 import * as addRefreshSessionId from '@/database/migrations/005_add_refresh_session_id';
+import * as usersActiveUniqueIndexes from '@/database/migrations/006_users_active_unique_indexes';
+import * as addRefreshTokensUserFk from '@/database/migrations/007_add_refresh_tokens_user_fk';
 import type { TokenPair } from '@/modules/auth/auth.service';
 import { hashToken } from '@/modules/auth/helpers/hash-token';
 import { RefreshTokensRepository } from '@/modules/auth/refresh-tokens.repository';
@@ -81,6 +83,8 @@ describe('Auth sessions and user privacy (PostgreSQL)', () => {
                   '003_add_users_deleted_at': addDeletedAt,
                   '004_users_age_description': addAgeDescription,
                   '005_add_refresh_session_id': addRefreshSessionId,
+                  '006_users_active_unique_indexes': usersActiveUniqueIndexes,
+                  '007_add_refresh_tokens_user_fk': addRefreshTokensUserFk,
                 }),
             },
           });
@@ -185,6 +189,89 @@ describe('Auth sessions and user privacy (PostgreSQL)', () => {
       payload: { refresh_token: token },
     });
   }
+
+  it('отклоняет сессию с несуществующим user_id на уровне БД', async () => {
+    await expect(
+      database
+        .insertInto('refresh_tokens')
+        .values({
+          session_id: randomUUID(),
+          token_hash: hashToken(randomUUID()),
+          user_id: -1,
+          expires_at: new Date(Date.now() + 60_000),
+        })
+        .execute(),
+    ).rejects.toMatchObject({
+      code: '23503',
+      constraint: 'refresh_tokens_user_id_fkey',
+    });
+  });
+
+  it('каскадно удаляет сессии при физическом удалении пользователя', async () => {
+    const { user } = await register();
+    const storedUser = await database
+      .selectFrom('users')
+      .select('id')
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const findSessions = () =>
+      database
+        .selectFrom('refresh_tokens')
+        .select('session_id')
+        .where('user_id', '=', storedUser.id)
+        .execute();
+
+    expect(await findSessions()).toHaveLength(1);
+
+    await database
+      .deleteFrom('users')
+      .where('id', '=', storedUser.id)
+      .execute();
+
+    expect(await findSessions()).toEqual([]);
+  });
+
+  it.each(['login', 'email', 'login и email'])(
+    'позволяет повторно использовать %s после soft delete, сохраняя уникальность активных',
+    async (field) => {
+      const { user, tokens } = await register();
+      const replacement = {
+        ...user,
+        login: field === 'email' ? `u-${randomUUID()}` : user.login,
+        email: field === 'login' ? `${randomUUID()}@example.com` : user.email,
+      };
+      const registerReplacement = () =>
+        app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: replacement,
+        });
+
+      expect((await registerReplacement()).statusCode).toBe(409);
+
+      const original = await database
+        .selectFrom('users')
+        .select('id')
+        .where('login', '=', user.login)
+        .executeTakeFirstOrThrow();
+      const removed = await app.inject({
+        method: 'DELETE',
+        url: `/users/${original.id}`,
+        headers: { authorization: `Bearer ${tokens.access_token}` },
+      });
+      expect(removed.statusCode).toBe(200);
+
+      const deleted = await database
+        .selectFrom('users')
+        .select('deleted_at')
+        .where('id', '=', original.id)
+        .executeTakeFirstOrThrow();
+      expect(deleted.deleted_at).toBeInstanceOf(Date);
+
+      expect((await registerReplacement()).statusCode).toBe(201);
+      expect((await registerReplacement()).statusCode).toBe(409);
+    },
+  );
 
   it('миграция отзывает старые refresh и сохраняет пользователей', async () => {
     const user = await database

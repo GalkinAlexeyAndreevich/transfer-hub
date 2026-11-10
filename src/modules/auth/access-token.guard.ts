@@ -6,7 +6,6 @@ import { TokenService } from './token.service';
 
 export type AuthUser = {
   id: number;
-  jti: string;
 };
 
 export type AuthenticatedRequest = FastifyRequest & {
@@ -30,7 +29,7 @@ export class AccessTokenGuard implements CanActivate {
       throw new UnauthorizedException('Требуется Bearer-токен');
     }
 
-    const { userId, jti } = await this.tokenService.verifyAccessToken(token);
+    const { userId } = await this.tokenService.verifyAccessToken(token);
 
     const user = await this.usersService.findOne(userId);
 
@@ -40,7 +39,6 @@ export class AccessTokenGuard implements CanActivate {
 
     request.user = {
       id: userId,
-      jti,
     };
 
     return true;

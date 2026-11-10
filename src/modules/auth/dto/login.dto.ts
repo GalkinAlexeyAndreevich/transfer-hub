@@ -7,7 +7,7 @@ export const loginSchema = z
       description: 'Логин пользователя',
       example: 'alexey',
     }),
-    password: z.string().min(12).meta({
+    password: z.string().min(1).meta({
       description: 'Пароль пользователя',
       example: 'ExamplePassword123!',
     }),
