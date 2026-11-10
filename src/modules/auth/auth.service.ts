@@ -1,11 +1,16 @@
 import { verifyPassword } from '@/common/helpers/password';
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { CreateUserDto } from '@/modules/users/dto/create-user.dto';
 import { UsersService } from '@/modules/users/users.service';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
 import { TokenService } from '../token/token.service';
 import { hashToken } from './helpers/hash-token';
 import { AUTH_MESSAGES } from './constants/messages';
+import { CurrentUserNotFoundError } from '@/modules/users/errors/user.errors';
+import {
+  InvalidCredentialsError,
+  RefreshTokenInactiveError,
+} from './errors/auth.errors';
 
 export type TokenPair = {
   access_token: string;
@@ -30,13 +35,13 @@ export class AuthService {
     const user = await this.usersService.findAuthInfoByLogin(login);
 
     if (!user) {
-      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
+      throw new InvalidCredentialsError(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     const isValidPassword = await verifyPassword(user.password_hash, password);
 
     if (!isValidPassword) {
-      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
+      throw new InvalidCredentialsError(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     return this.startSession(user.id);
@@ -56,7 +61,7 @@ export class AuthService {
     const user = await this.usersService.findOne(userId);
 
     if (!user) {
-      throw new UnauthorizedException(AUTH_MESSAGES.USER_NOT_FOUND);
+      throw new CurrentUserNotFoundError(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
     const { tokens, refreshExpiresAt } = await this.tokenService.generateTokens(
@@ -73,10 +78,7 @@ export class AuthService {
     });
 
     if (!rotated) {
-      throw new UnauthorizedException({
-        code: 'REFRESH_TOKEN_INACTIVE',
-        message: AUTH_MESSAGES.SESSION_EXPIRED,
-      });
+      throw new RefreshTokenInactiveError(AUTH_MESSAGES.SESSION_EXPIRED);
     }
 
     return tokens;
@@ -94,7 +96,7 @@ export class AuthService {
     });
 
     if (!created) {
-      throw new UnauthorizedException('Пользователь не существует');
+      throw new CurrentUserNotFoundError(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
     return tokens;

@@ -1,9 +1,10 @@
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import jwtConfig from '@/config/jwt.config';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { InvalidTokenError } from './errors/token.errors';
 
 type TokenType = 'access' | 'refresh';
 
@@ -102,11 +103,12 @@ export class TokenService {
             : this.config.JWT_REFRESH_SECRET,
         algorithms: ['HS256'],
       });
-    } catch {
-      throw new UnauthorizedException(
+    } catch (error: unknown) {
+      throw new InvalidTokenError(
         expectedType === 'access'
           ? 'Access token недействителен или истёк'
           : 'Refresh token недействителен или истёк',
+        { cause: error },
       );
     }
 
@@ -116,7 +118,7 @@ export class TokenService {
         : 'Некорректный refresh token';
 
     if (!payload) {
-      throw new UnauthorizedException(invalidPayloadMessage);
+      throw new InvalidTokenError(invalidPayloadMessage);
     }
 
     if (
@@ -126,20 +128,20 @@ export class TokenService {
       typeof payload.jti !== 'string' ||
       !payload.jti
     ) {
-      throw new UnauthorizedException(invalidPayloadMessage);
+      throw new InvalidTokenError(invalidPayloadMessage);
     }
 
     const userId = Number(payload.sub);
 
     if (!Number.isSafeInteger(userId) || userId <= 0) {
-      throw new UnauthorizedException(invalidPayloadMessage);
+      throw new InvalidTokenError(invalidPayloadMessage);
     }
 
     if (expectedType === 'refresh') {
       const sessionId = sessionIdSchema.safeParse(payload.sid);
 
       if (!sessionId.success) {
-        throw new UnauthorizedException('Сессия истекла, войди заново');
+        throw new InvalidTokenError('Сессия истекла, войди заново');
       }
 
       return { userId, jti: payload.jti, sessionId: sessionId.data };

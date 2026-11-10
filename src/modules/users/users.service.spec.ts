@@ -1,7 +1,10 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { UsersRepository } from './users.repository';
 import { UsersService } from './users.service';
+import {
+  ProfileAccessDeniedError,
+  UserNotFoundError,
+} from './errors/user.errors';
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -46,7 +49,7 @@ describe('UsersService', () => {
 
   it('запрещает обновление чужого профиля', async () => {
     await expect(service.update(1, { age: 30 }, 2)).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ProfileAccessDeniedError,
     );
 
     expect(repository.update).not.toHaveBeenCalled();
@@ -56,13 +59,13 @@ describe('UsersService', () => {
     repository.update.mockResolvedValue(undefined);
 
     await expect(service.update(1, { age: 30 }, 1)).rejects.toBeInstanceOf(
-      NotFoundException,
+      UserNotFoundError,
     );
   });
 
   it('запрещает удаление чужого профиля', async () => {
     await expect(service.remove(1, 2)).rejects.toBeInstanceOf(
-      ForbiddenException,
+      ProfileAccessDeniedError,
     );
 
     expect(repository.remove).not.toHaveBeenCalled();

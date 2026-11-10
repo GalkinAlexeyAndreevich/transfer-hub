@@ -1,8 +1,9 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Insertable, Updateable } from 'kysely';
 import { DatabaseService } from '@/database/database.service';
 import type { Database } from '@/database/database.types';
 import { DatabaseError } from 'pg';
+import { UserAlreadyExistsError } from './errors/user.errors';
 
 type NewUser = Insertable<Database['users']>;
 type UserChanges = Updateable<
@@ -129,9 +130,15 @@ export class UsersRepository {
   }
 
   private uniqueUserError(error: unknown): never {
-    if (error instanceof DatabaseError && error.code === '23505') {
-      throw new ConflictException(
+    if (
+      error instanceof DatabaseError &&
+      error.code === '23505' &&
+      (error.constraint === 'users_login_active_uq' ||
+        error.constraint === 'users_email_active_uq')
+    ) {
+      throw new UserAlreadyExistsError(
         'Пользователь с таким email или login уже существует',
+        { cause: error },
       );
     }
 

@@ -1,5 +1,4 @@
 import {
-  NotFoundException,
   StandardSchemaValidationPipe,
   type ExecutionContext,
 } from '@nestjs/common';
@@ -15,6 +14,7 @@ import {
 } from '@/modules/auth/guards/access-token.guard';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
+import { UserNotFoundError } from './errors/user.errors';
 
 describe('UsersController: валидация ID', () => {
   let app: NestFastifyApplication;
@@ -103,7 +103,7 @@ describe('UsersController: валидация ID', () => {
 
   it('сохраняет 404 для отсутствующего пользователя с допустимым ID', async () => {
     service.findOneOrThrow.mockRejectedValue(
-      new NotFoundException('Пользователь не найден'),
+      new UserNotFoundError('Пользователь не найден'),
     );
 
     const response = await app.inject({

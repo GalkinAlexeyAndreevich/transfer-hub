@@ -7,7 +7,7 @@ export const createUserSchema = z.strictObject({
     example: 'alexey',
   }),
 
-  email: z.email().trim().toLowerCase().pipe(z.email().max(254)).meta({
+  email: z.string().trim().toLowerCase().pipe(z.email().max(254)).meta({
     description: 'Электронная почта',
     example: 'alexey@example.com',
   }),

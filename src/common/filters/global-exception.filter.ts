@@ -1,12 +1,58 @@
-import { Catch, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import {
+  CurrentUserNotFoundError,
+  ProfileAccessDeniedError,
+  UserAlreadyExistsError,
+  UserNotFoundError,
+} from '@/modules/users/errors/user.errors';
+import {
+  Catch,
+  ConflictException,
+  ForbiddenException,
+  HttpException,
+  HttpStatus,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import {
+  InvalidCredentialsError,
+  RefreshTokenInactiveError,
+} from '@/modules/auth/errors/auth.errors';
+import { InvalidTokenError } from '@/modules/token/errors/token.errors';
+
+function mapApplicationErrorToHttp(error: unknown): unknown {
+  if (error instanceof UserAlreadyExistsError) {
+    return new ConflictException(error.message, { cause: error });
+  }
+
+  if (error instanceof UserNotFoundError) {
+    return new NotFoundException(error.message, { cause: error });
+  }
+
+  if (error instanceof ProfileAccessDeniedError) {
+    return new ForbiddenException(error.message, { cause: error });
+  }
+
+  if (
+    error instanceof CurrentUserNotFoundError ||
+    error instanceof InvalidCredentialsError ||
+    error instanceof InvalidTokenError ||
+    error instanceof RefreshTokenInactiveError
+  ) {
+    return new UnauthorizedException(error.message, { cause: error });
+  }
+
+  return error;
+}
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
 
   catch(exception: unknown, host: ArgumentsHost): void {
+    exception = mapApplicationErrorToHttp(exception);
     const context = host.switchToHttp();
     const request = context.getRequest<FastifyRequest>();
     const response = context.getResponse<FastifyReply>();

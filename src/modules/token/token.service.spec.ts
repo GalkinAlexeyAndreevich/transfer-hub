@@ -1,6 +1,6 @@
-import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { TokenService } from '../token/token.service';
+import { InvalidTokenError } from './errors/token.errors';
 
 describe('TokenService', () => {
   const config = {
@@ -40,7 +40,7 @@ describe('TokenService', () => {
       );
 
       await expect(service.verifyRefreshToken(token)).rejects.toBeInstanceOf(
-        UnauthorizedException,
+        InvalidTokenError,
       );
     },
   );
@@ -50,9 +50,9 @@ describe('TokenService', () => {
 
     await expect(
       service.verifyRefreshToken(tokens.access_token),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    ).rejects.toBeInstanceOf(InvalidTokenError);
     await expect(
       service.verifyAccessToken(tokens.refresh_token),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    ).rejects.toBeInstanceOf(InvalidTokenError);
   });
 });

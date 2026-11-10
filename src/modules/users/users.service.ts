@@ -1,14 +1,14 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
 import type { FindUsersQueryDto } from './dto/find-users.dto';
 import { hashPassword } from '@/common/helpers/password';
+import {
+  CurrentUserNotFoundError,
+  ProfileAccessDeniedError,
+  UserNotFoundError,
+} from './errors/user.errors';
 
 @Injectable()
 export class UsersService {
@@ -55,7 +55,7 @@ export class UsersService {
     const user = await this.findOne(id);
 
     if (!user) {
-      throw new NotFoundException('Пользователь не найден');
+      throw new UserNotFoundError('Пользователь не найден');
     }
 
     return user;
@@ -65,7 +65,7 @@ export class UsersService {
     const user = await this.userRepository.findProfile(id);
 
     if (!user) {
-      throw new UnauthorizedException('Пользователь не найден');
+      throw new CurrentUserNotFoundError('Пользователь не найден');
     }
 
     return user;
@@ -73,13 +73,13 @@ export class UsersService {
 
   async update(id: number, dto: UpdateUserDto, initiatorId: number) {
     if (initiatorId !== id) {
-      throw new ForbiddenException('Нельзя изменять чужой профиль');
+      throw new ProfileAccessDeniedError('Нельзя изменять чужой профиль');
     }
 
     const user = await this.userRepository.update(id, dto);
 
     if (!user) {
-      throw new NotFoundException('Пользователь не найден');
+      throw new UserNotFoundError('Пользователь не найден');
     }
 
     return user;
@@ -87,13 +87,13 @@ export class UsersService {
 
   async remove(id: number, initiatorId: number) {
     if (initiatorId !== id) {
-      throw new ForbiddenException('Нельзя удалять чужой профиль');
+      throw new ProfileAccessDeniedError('Нельзя удалять чужой профиль');
     }
 
     const user = await this.userRepository.remove(id);
 
     if (!user) {
-      throw new NotFoundException('Пользователь не найден');
+      throw new UserNotFoundError('Пользователь не найден');
     }
 
     return user;

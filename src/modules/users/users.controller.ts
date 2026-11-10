@@ -23,33 +23,27 @@ import {
 import { ApiBearerAuth } from '@nestjs/swagger';
 
 @Controller('users')
+@UseGuards(AccessTokenGuard)
+@ApiBearerAuth()
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  @UseGuards(AccessTokenGuard)
-  @ApiBearerAuth()
   findAll(@Query({ schema: findUsersQuerySchema }) query: FindUsersQueryDto) {
     return this.usersService.findAll(query);
   }
 
   @Get('me')
-  @UseGuards(AccessTokenGuard)
-  @ApiBearerAuth()
   me(@Req() request: AuthenticatedRequest) {
     return this.usersService.me(request.user.id);
   }
 
   @Get(':id')
-  @UseGuards(AccessTokenGuard)
-  @ApiBearerAuth()
   findOne(@Param('id', { schema: idSchema }) id: number) {
     return this.usersService.findOneOrThrow(id);
   }
 
   @Patch(':id')
-  @UseGuards(AccessTokenGuard)
-  @ApiBearerAuth()
   update(
     @Param('id', { schema: idSchema }) id: number,
     @Req() request: AuthenticatedRequest,
@@ -59,8 +53,6 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @UseGuards(AccessTokenGuard)
-  @ApiBearerAuth()
   remove(
     @Param('id', { schema: idSchema }) id: number,
     @Req() request: AuthenticatedRequest,
