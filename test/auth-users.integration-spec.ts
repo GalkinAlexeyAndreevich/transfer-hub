@@ -23,7 +23,7 @@ import * as addRefreshTokensUserFk from '@/database/migrations/007_add_refresh_t
 import type { TokenPair } from '@/modules/auth/auth.service';
 import { hashToken } from '@/modules/auth/helpers/hash-token';
 import { RefreshTokensRepository } from '@/modules/auth/refresh-tokens.repository';
-import { TokenService } from '@/modules/auth/token.service';
+import { TokenService } from '@/modules/token/token.service';
 
 type PublicUser = {
   id: number;

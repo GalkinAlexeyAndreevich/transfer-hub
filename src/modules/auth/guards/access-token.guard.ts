@@ -2,7 +2,7 @@ import { UsersService } from '@/modules/users/users.service';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { TokenService } from './token.service';
+import { TokenService } from '../../token/token.service';
 
 export type AuthUser = {
   id: number;

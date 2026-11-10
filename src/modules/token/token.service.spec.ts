@@ -1,6 +1,6 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { TokenService } from './token.service';
+import { TokenService } from '../token/token.service';
 
 describe('TokenService', () => {
   const config = {

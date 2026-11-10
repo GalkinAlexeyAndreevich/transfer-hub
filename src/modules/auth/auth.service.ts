@@ -3,7 +3,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { CreateUserDto } from '@/modules/users/dto/create-user.dto';
 import { UsersService } from '@/modules/users/users.service';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
-import { TokenService } from './token.service';
+import { TokenService } from '../token/token.service';
 import { hashToken } from './helpers/hash-token';
 import { AUTH_MESSAGES } from './constants/messages';
 

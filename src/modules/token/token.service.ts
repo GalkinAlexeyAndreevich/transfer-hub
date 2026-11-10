@@ -4,7 +4,6 @@ import { JwtService } from '@nestjs/jwt';
 import jwtConfig from '@/config/jwt.config';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { AUTH_MESSAGES } from './constants/messages';
 
 type TokenType = 'access' | 'refresh';
 
@@ -140,7 +139,7 @@ export class TokenService {
       const sessionId = sessionIdSchema.safeParse(payload.sid);
 
       if (!sessionId.success) {
-        throw new UnauthorizedException(AUTH_MESSAGES.SESSION_EXPIRED);
+        throw new UnauthorizedException('Сессия истекла, войди заново');
       }
 
       return { userId, jti: payload.jti, sessionId: sessionId.data };

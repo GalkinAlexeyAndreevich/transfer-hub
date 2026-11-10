@@ -12,7 +12,7 @@ import { GlobalExceptionFilter } from '@/common/filters/global-exception.filter'
 import {
   AccessTokenGuard,
   type AuthenticatedRequest,
-} from '@/modules/auth/access-token.guard';
+} from '@/modules/auth/guards/access-token.guard';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
@@ -37,7 +37,7 @@ describe('UsersController: валидация ID', () => {
           const request = context
             .switchToHttp()
             .getRequest<AuthenticatedRequest>();
-          request.user = { id: 1, jti: 'test' };
+          request.user = { id: 1 };
           return true;
         },
       })
