@@ -5,12 +5,11 @@ import { UsersController } from './users.controller';
 import { DatabaseModule } from '@/database/database.module';
 import { TokenModule } from '@/modules/auth/token.module';
 import { AccessTokenGuard } from '@/modules/auth/access-token.guard';
-import { PasswordService } from '@/common/password/password.service';
 
 @Module({
   imports: [DatabaseModule, TokenModule],
   controllers: [UsersController],
-  providers: [UsersService, UsersRepository, AccessTokenGuard, PasswordService],
+  providers: [UsersService, UsersRepository, AccessTokenGuard],
   exports: [UsersService, AccessTokenGuard],
 })
 export class UsersModule {}

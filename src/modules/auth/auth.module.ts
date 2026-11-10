@@ -4,11 +4,10 @@ import { AuthController } from './auth.controller';
 import { UsersModule } from '@/modules/users/users.module';
 import { RefreshTokensRepository } from './refresh-tokens.repository';
 import { TokenModule } from './token.module';
-import { PasswordService } from '@/common/password/password.service';
 
 @Module({
   imports: [UsersModule, TokenModule],
   controllers: [AuthController],
-  providers: [AuthService, RefreshTokensRepository, PasswordService],
+  providers: [AuthService, RefreshTokensRepository],
 })
 export class AuthModule {}

@@ -8,16 +8,13 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
 import type { FindUsersQueryDto } from './dto/find-users.dto';
-import { PasswordService } from '@/common/password/password.service';
+import { hashPassword } from '@/common/helpers/password';
 
 @Injectable()
 export class UsersService {
-  constructor(
-    private readonly userRepository: UsersRepository,
-    private readonly passwordService: PasswordService,
-  ) {}
+  constructor(private readonly userRepository: UsersRepository) {}
   async create(dto: CreateUserDto) {
-    const passwordHash = await this.passwordService.hash(dto.password);
+    const passwordHash = await hashPassword(dto.password);
 
     return this.userRepository.create({
       login: dto.login,

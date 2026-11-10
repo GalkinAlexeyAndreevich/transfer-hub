@@ -2,7 +2,6 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { UsersRepository } from './users.repository';
 import { UsersService } from './users.service';
-import { PasswordService } from '@/common/password/password.service';
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -21,10 +20,6 @@ describe('UsersService', () => {
         {
           provide: UsersRepository,
           useValue: repository,
-        },
-        {
-          provide: PasswordService,
-          useValue: {},
         },
       ],
     }).compile();

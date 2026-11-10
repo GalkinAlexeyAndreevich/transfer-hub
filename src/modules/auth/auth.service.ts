@@ -1,4 +1,4 @@
-import { PasswordService } from '@/common/password/password.service';
+import { verifyPassword } from '@/common/helpers/password';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { CreateUserDto } from '@/modules/users/dto/create-user.dto';
 import { UsersService } from '@/modules/users/users.service';
@@ -18,7 +18,6 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly refreshTokensRepository: RefreshTokensRepository,
     private readonly tokenService: TokenService,
-    private readonly passwordService: PasswordService,
   ) {}
 
   async register(dto: CreateUserDto): Promise<TokenPair> {
@@ -34,10 +33,7 @@ export class AuthService {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
-    const isValidPassword = await this.passwordService.verify(
-      user.password_hash,
-      password,
-    );
+    const isValidPassword = await verifyPassword(user.password_hash, password);
 
     if (!isValidPassword) {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
