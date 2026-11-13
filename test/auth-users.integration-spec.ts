@@ -1,0 +1,968 @@
+import { randomUUID } from 'node:crypto';
+import cookie from '@fastify/cookie';
+import type { LightMyRequestResponse } from 'fastify';
+import { StandardSchemaValidationPipe } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
+import {
+  FastifyAdapter,
+  type NestFastifyApplication,
+} from '@nestjs/platform-fastify';
+import { Test } from '@nestjs/testing';
+import { Kysely, PostgresDialect, sql } from 'kysely';
+import { Migrator } from 'kysely/migration';
+import { Pool } from 'pg';
+import { AppModule } from '@/app.module';
+import databaseConfig from '@/config/database.config';
+import { DatabaseService } from '@/database/database.service';
+import type { Database } from '@/database/database.types';
+import * as createUsers from '@/database/migrations/001_create_users';
+import * as createRefreshTokens from '@/database/migrations/002_create_refresh_tokens';
+import * as addDeletedAt from '@/database/migrations/003_add_users_deleted_at';
+import * as addAgeDescription from '@/database/migrations/004_users_age_description';
+import * as addRefreshSessionId from '@/database/migrations/005_add_refresh_session_id';
+import * as usersActiveUniqueIndexes from '@/database/migrations/006_users_active_unique_indexes';
+import * as addRefreshTokensUserFk from '@/database/migrations/007_add_refresh_tokens_user_fk';
+import type { TokenPair } from '@/modules/auth/auth.service';
+import { hashToken } from '@/modules/auth/helpers/hash-token';
+import { RefreshTokensRepository } from '@/modules/sessions/refresh-tokens.repository';
+import { UsersRepository } from '@/modules/users/users.repository';
+
+type PublicUser = {
+  id: number;
+  login: string;
+  age: number;
+  description: string | null;
+};
+
+type UserProfile = PublicUser & { email: string };
+
+function gate() {
+  let resolve = () => {};
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+
+  return { promise, resolve };
+}
+
+describe('Auth and users (PostgreSQL)', () => {
+  const schema = `test_auth_${randomUUID().replaceAll('-', '')}`;
+  const legacyHash = 'a'.repeat(64);
+  let app: NestFastifyApplication;
+  let database: Kysely<Database>;
+  let admin: Kysely<Database>;
+  let legacyUserId: number;
+
+  beforeAll(async () => {
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(DatabaseService)
+      .useFactory({
+        inject: [databaseConfig.KEY],
+        factory: async (config: ConfigType<typeof databaseConfig>) => {
+          admin = new Kysely<Database>({
+            dialect: new PostgresDialect({
+              pool: new Pool({ connectionString: config.url }),
+            }),
+          });
+          await admin.schema.createSchema(schema).execute();
+
+          const url = new URL(config.url);
+          url.searchParams.set('options', `-c search_path=${schema}`);
+          database = new Kysely<Database>({
+            dialect: new PostgresDialect({
+              pool: new Pool({ connectionString: url.toString() }),
+            }),
+          });
+
+          const migrator = new Migrator({
+            db: database,
+            migrationTableSchema: schema,
+            provider: {
+              getMigrations: () =>
+                Promise.resolve({
+                  '001_create_users': createUsers,
+                  '002_create_refresh_tokens': createRefreshTokens,
+                  '003_add_users_deleted_at': addDeletedAt,
+                  '004_users_age_description': addAgeDescription,
+                  '005_add_refresh_session_id': addRefreshSessionId,
+                  '006_users_active_unique_indexes': usersActiveUniqueIndexes,
+                  '007_add_refresh_tokens_user_fk': addRefreshTokensUserFk,
+                }),
+            },
+          });
+          const initial = await migrator.migrateTo('004_users_age_description');
+          if (initial.error) {
+            throw new Error('Не удалось подготовить схему тестов', {
+              cause: initial.error,
+            });
+          }
+
+          const legacyUser = await database
+            .insertInto('users')
+            .values({
+              login: 'legacy',
+              email: 'legacy@example.com',
+              password_hash: 'unused-test-hash',
+              age: 25,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+          legacyUserId = legacyUser.id;
+          await sql`
+            INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+            VALUES (${legacyUserId}, ${legacyHash}, now() + interval '1 day')
+          `.execute(database);
+
+          const migrated = await migrator.migrateToLatest();
+          if (migrated.error) {
+            throw new Error('Не удалось применить миграцию сессий', {
+              cause: migrated.error,
+            });
+          }
+
+          return { db: database };
+        },
+      })
+      .compile();
+
+    const adapter = new FastifyAdapter();
+    app = module.createNestApplication<NestFastifyApplication>(adapter, {
+      logger: false,
+    });
+    await app.register(cookie);
+    app.useGlobalPipes(new StandardSchemaValidationPipe());
+    await app.init();
+    await adapter.getInstance().ready();
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  afterAll(async () => {
+    try {
+      if (app) await app.close();
+    } finally {
+      try {
+        if (database) await database.destroy();
+      } finally {
+        if (admin) {
+          try {
+            await admin.schema
+              .dropSchema(schema)
+              .ifExists()
+              .cascade()
+              .execute();
+          } finally {
+            await admin.destroy();
+          }
+        }
+      }
+    }
+  });
+
+  async function register() {
+    const login = `u-${randomUUID()}`;
+    const user = {
+      login,
+      email: `${login}@example.com`,
+      password: 'ExamplePassword123!',
+      age: 25,
+    };
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: user,
+    });
+    expect(response.statusCode).toBe(201);
+
+    return { user, tokens: readTokens(response) };
+  }
+
+  function readTokens(response: LightMyRequestResponse): TokenPair {
+    const tokens = response.json<{ access_token: string }>();
+    expect(Object.keys(tokens)).toEqual(['access_token']);
+    expect(typeof tokens.access_token).toBe('string');
+    const refreshCookie = response.cookies.find(
+      (cookie) => cookie.name === 'refresh_token',
+    );
+    expect(refreshCookie).toMatchObject({
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Strict',
+      path: '/auth',
+    });
+    expect(refreshCookie?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(refreshCookie?.expires).toBeInstanceOf(Date);
+
+    return { ...tokens, refresh_token: refreshCookie!.value };
+  }
+
+  function refresh(token: string) {
+    return app.inject({
+      method: 'POST',
+      url: '/auth/refresh-token',
+      cookies: { refresh_token: token },
+    });
+  }
+
+  function logout(token: string) {
+    return app.inject({
+      method: 'POST',
+      url: '/auth/logout',
+      cookies: { refresh_token: token },
+    });
+  }
+
+  it('не создаёт сессию при входе с неверным паролем', async () => {
+    const { user } = await register();
+    const storedUser = await database
+      .selectFrom('users')
+      .select('id')
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const findSessions = () =>
+      database
+        .selectFrom('refresh_tokens')
+        .selectAll()
+        .where('user_id', '=', storedUser.id)
+        .orderBy('session_id')
+        .execute();
+    const before = await findSessions();
+    expect(before).toHaveLength(1);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { login: user.login, password: 'WrongPassword123!' },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.json<{ message: string[] }>().message).toEqual([
+      'Неверный логин или пароль',
+    ]);
+    expect(await findSessions()).toEqual(before);
+  });
+
+  it.each(['login', 'email'] as const)(
+    'возвращает 409 при обновлении на занятый %s и сохраняет исходные данные',
+    async (field) => {
+      const owner = await register();
+      const occupied = await register();
+      const before = await database
+        .selectFrom('users')
+        .selectAll()
+        .where('login', '=', owner.user.login)
+        .executeTakeFirstOrThrow();
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/users/${before.id}`,
+        headers: { authorization: `Bearer ${owner.tokens.access_token}` },
+        payload: { [field]: occupied.user[field], age: 30 },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json<{ message: string[] }>().message).toEqual([
+        'Пользователь с таким email или login уже существует',
+      ]);
+      const after = await database
+        .selectFrom('users')
+        .selectAll()
+        .where('id', '=', before.id)
+        .executeTakeFirstOrThrow();
+      expect(after).toEqual(before);
+    },
+  );
+
+  it('soft delete скрывает пользователя и отзывает все его сессии', async () => {
+    const { user, tokens } = await register();
+    const observer = await register();
+    const observerHeaders = {
+      authorization: `Bearer ${observer.tokens.access_token}`,
+    };
+    const storedUser = await database
+      .selectFrom('users')
+      .select('id')
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const login = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { login: user.login, password: user.password },
+    });
+    expect(login.statusCode).toBe(201);
+    const anotherSession = readTokens(login);
+    const findSessions = () =>
+      database
+        .selectFrom('refresh_tokens')
+        .select('session_id')
+        .where('user_id', '=', storedUser.id)
+        .execute();
+    expect(await findSessions()).toHaveLength(2);
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/users/${storedUser.id}`,
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    expect(removed.statusCode).toBe(200);
+    const deleted = await database
+      .selectFrom('users')
+      .select('deleted_at')
+      .where('id', '=', storedUser.id)
+      .executeTakeFirstOrThrow();
+    expect(deleted.deleted_at).toBeInstanceOf(Date);
+    expect(await findSessions()).toEqual([]);
+
+    const profile = await app.inject({
+      method: 'GET',
+      url: `/users/${storedUser.id}`,
+      headers: observerHeaders,
+    });
+    expect(profile.statusCode).toBe(404);
+    expect(profile.json<{ message: string[] }>().message).toEqual([
+      'Пользователь не найден',
+    ]);
+    const list = await app.inject({
+      method: 'GET',
+      url: '/users',
+      query: { login: user.login },
+      headers: observerHeaders,
+    });
+    expect(list.statusCode).toBe(200);
+    expect(
+      list.json<{ items: PublicUser[]; meta: { total: number } }>(),
+    ).toMatchObject({
+      items: [],
+      meta: { total: 0 },
+    });
+
+    for (const session of [tokens, anotherSession]) {
+      const me = await app.inject({
+        method: 'GET',
+        url: '/users/me',
+        headers: { authorization: `Bearer ${session.access_token}` },
+      });
+      expect(me.statusCode).toBe(401);
+      expect(me.json<{ message: string[] }>().message).toEqual([
+        'Пользователь не найден',
+      ]);
+      expect((await refresh(session.refresh_token)).statusCode).toBe(401);
+    }
+    const relogin = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { login: user.login, password: user.password },
+    });
+    expect(relogin.statusCode).toBe(401);
+    expect(await findSessions()).toEqual([]);
+    expect((await refresh(observer.tokens.refresh_token)).statusCode).toBe(201);
+  });
+
+  it('откатывает soft delete и отзыв сессий при ошибке транзакции', async () => {
+    const { user, tokens } = await register();
+    const storedUser = await database
+      .selectFrom('users')
+      .selectAll()
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const findSessions = () =>
+      database
+        .selectFrom('refresh_tokens')
+        .selectAll()
+        .where('user_id', '=', storedUser.id)
+        .execute();
+    const sessions = await findSessions();
+    expect(sessions).toHaveLength(1);
+    const repository = app.get(RefreshTokensRepository);
+    const databaseRepository = new RefreshTokensRepository(
+      app.get<DatabaseService>(DatabaseService),
+    );
+    jest
+      .spyOn(repository, 'removeAllForUser')
+      .mockImplementationOnce(async (userId, trx) => {
+        await databaseRepository.removeAllForUser(userId, trx);
+        throw new Error('Ошибка после отзыва сессий');
+      });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/users/${storedUser.id}`,
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(
+      await database
+        .selectFrom('users')
+        .selectAll()
+        .where('id', '=', storedUser.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual(storedUser);
+    expect(await findSessions()).toEqual(sessions);
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(201);
+  });
+
+  it.each(['до', 'после'] as const)(
+    'не оставляет сессию при удалении пользователя %s блокировки при входе',
+    async (deletionOrder) => {
+      const { user, tokens } = await register();
+      const storedUser = await database
+        .selectFrom('users')
+        .select('id')
+        .where('login', '=', user.login)
+        .executeTakeFirstOrThrow();
+      const repository = app.get(UsersRepository);
+      const databaseRepository = new UsersRepository(
+        app.get<DatabaseService>(DatabaseService),
+      );
+      const found = gate();
+      const release = gate();
+      jest
+        .spyOn(repository, 'findOneForUpdate')
+        .mockImplementationOnce(async (id, trx) => {
+          if (deletionOrder === 'до') {
+            found.resolve();
+            await release.promise;
+          }
+
+          const result = await databaseRepository.findOneForUpdate(id, trx);
+
+          if (deletionOrder === 'после') {
+            found.resolve();
+            await release.promise;
+          }
+
+          return result;
+        });
+
+      const pendingLogin = app
+        .inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: { login: user.login, password: user.password },
+        })
+        .then((response) => response);
+      let pendingDeletion: Promise<LightMyRequestResponse> | undefined;
+      try {
+        await Promise.race([
+          found.promise,
+          pendingLogin.then(() => {
+            throw new Error('Вход завершился до контрольной точки');
+          }),
+        ]);
+
+        if (deletionOrder === 'после') {
+          await expect(
+            database
+              .transaction()
+              .execute((trx) =>
+                trx
+                  .selectFrom('users')
+                  .select('id')
+                  .where('id', '=', storedUser.id)
+                  .forUpdate()
+                  .noWait()
+                  .execute(),
+              ),
+          ).rejects.toMatchObject({ code: '55P03' });
+        }
+
+        pendingDeletion = app
+          .inject({
+            method: 'DELETE',
+            url: `/users/${storedUser.id}`,
+            headers: { authorization: `Bearer ${tokens.access_token}` },
+          })
+          .then((response) => response);
+
+        if (deletionOrder === 'до') {
+          expect((await pendingDeletion).statusCode).toBe(200);
+        }
+      } finally {
+        release.resolve();
+      }
+
+      const response = await pendingLogin;
+      expect(response.statusCode).toBe(deletionOrder === 'до' ? 401 : 201);
+      expect((await pendingDeletion)?.statusCode).toBe(200);
+      expect(
+        await database
+          .selectFrom('refresh_tokens')
+          .selectAll()
+          .where('user_id', '=', storedUser.id)
+          .execute(),
+      ).toEqual([]);
+      if (response.statusCode === 201) {
+        expect(
+          (await refresh(readTokens(response).refresh_token)).statusCode,
+        ).toBe(401);
+      }
+    },
+  );
+
+  it('отклоняет сессию с несуществующим user_id на уровне БД', async () => {
+    await expect(
+      database
+        .insertInto('refresh_tokens')
+        .values({
+          session_id: randomUUID(),
+          token_hash: hashToken(randomUUID()),
+          user_id: -1,
+          expires_at: new Date(Date.now() + 60_000),
+        })
+        .execute(),
+    ).rejects.toMatchObject({
+      code: '23503',
+      constraint: 'refresh_tokens_user_id_fkey',
+    });
+  });
+
+  it('каскадно удаляет сессии при физическом удалении пользователя', async () => {
+    const { user } = await register();
+    const storedUser = await database
+      .selectFrom('users')
+      .select('id')
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const findSessions = () =>
+      database
+        .selectFrom('refresh_tokens')
+        .select('session_id')
+        .where('user_id', '=', storedUser.id)
+        .execute();
+
+    expect(await findSessions()).toHaveLength(1);
+
+    await database
+      .deleteFrom('users')
+      .where('id', '=', storedUser.id)
+      .execute();
+
+    expect(await findSessions()).toEqual([]);
+  });
+
+  it.each(['login', 'email', 'login и email'])(
+    'позволяет повторно использовать %s после soft delete, сохраняя уникальность активных',
+    async (field) => {
+      const { user, tokens } = await register();
+      const replacement = {
+        ...user,
+        login: field === 'email' ? `u-${randomUUID()}` : user.login,
+        email: field === 'login' ? `${randomUUID()}@example.com` : user.email,
+      };
+      const registerReplacement = () =>
+        app.inject({
+          method: 'POST',
+          url: '/auth/register',
+          payload: replacement,
+        });
+
+      expect((await registerReplacement()).statusCode).toBe(409);
+
+      const original = await database
+        .selectFrom('users')
+        .select('id')
+        .where('login', '=', user.login)
+        .executeTakeFirstOrThrow();
+      const removed = await app.inject({
+        method: 'DELETE',
+        url: `/users/${original.id}`,
+        headers: { authorization: `Bearer ${tokens.access_token}` },
+      });
+      expect(removed.statusCode).toBe(200);
+
+      const deleted = await database
+        .selectFrom('users')
+        .select('deleted_at')
+        .where('id', '=', original.id)
+        .executeTakeFirstOrThrow();
+      expect(deleted.deleted_at).toBeInstanceOf(Date);
+
+      expect((await registerReplacement()).statusCode).toBe(201);
+      expect((await registerReplacement()).statusCode).toBe(409);
+    },
+  );
+
+  it('миграция отзывает старые refresh и сохраняет пользователей', async () => {
+    const user = await database
+      .selectFrom('users')
+      .select('id')
+      .where('id', '=', legacyUserId)
+      .executeTakeFirst();
+    const token = await database
+      .selectFrom('refresh_tokens')
+      .select('token_hash')
+      .where('token_hash', '=', legacyHash)
+      .executeTakeFirst();
+
+    expect(user).toEqual({ id: legacyUserId });
+    expect(token).toBeUndefined();
+  });
+
+  it('ротирует одноразовый refresh в пределах одного sid и хранит хеш', async () => {
+    const { tokens } = await register();
+    const initial = await database
+      .selectFrom('refresh_tokens')
+      .select('session_id')
+      .where('token_hash', '=', hashToken(tokens.refresh_token))
+      .executeTakeFirstOrThrow();
+    const response = await refresh(tokens.refresh_token);
+    expect(response.statusCode).toBe(201);
+    const rotated = readTokens(response);
+    expect(rotated.refresh_token).not.toBe(tokens.refresh_token);
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(401);
+
+    const stored = await database
+      .selectFrom('refresh_tokens')
+      .select(['token_hash', 'expires_at'])
+      .where('session_id', '=', initial.session_id)
+      .executeTakeFirstOrThrow();
+    expect(stored.token_hash).toBe(hashToken(rotated.refresh_token));
+    expect(stored.token_hash).not.toBe(rotated.refresh_token);
+    expect(response.cookies[0].expires).toEqual(stored.expires_at);
+  });
+
+  it.each(['refresh-token', 'logout'])(
+    'читает refresh для %s из cookie и отклоняет токен только в теле',
+    async (route) => {
+      const { tokens } = await register();
+      const response = await app.inject({
+        method: 'POST',
+        url: `/auth/${route}`,
+        payload: { refresh_token: tokens.refresh_token },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect((await refresh(tokens.refresh_token)).statusCode).toBe(201);
+    },
+  );
+
+  it('проверяет срок refresh в БД', async () => {
+    const { tokens } = await register();
+    await database
+      .updateTable('refresh_tokens')
+      .set({ expires_at: new Date(Date.now() - 1000) })
+      .where('token_hash', '=', hashToken(tokens.refresh_token))
+      .execute();
+
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(401);
+    expect((await logout(tokens.refresh_token)).statusCode).toBe(401);
+  });
+
+  it('отклоняет неизвестный refresh и access вместо refresh', async () => {
+    const { tokens } = await register();
+
+    expect((await refresh(randomUUID())).statusCode).toBe(401);
+    expect((await refresh(tokens.access_token)).statusCode).toBe(401);
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(201);
+  });
+
+  it('позволяет только один из двух одновременных refresh', async () => {
+    const { tokens } = await register();
+    const results = await Promise.all([
+      refresh(tokens.refresh_token),
+      refresh(tokens.refresh_token),
+    ]);
+
+    expect(results.map((response) => response.statusCode).sort()).toEqual([
+      201, 401,
+    ]);
+  });
+
+  it('logout отзывает ротированную сессию, найденную до замены хеша', async () => {
+    const { tokens } = await register();
+    const repository = app.get(RefreshTokensRepository);
+    const databaseRepository = new RefreshTokensRepository(
+      app.get<DatabaseService>(DatabaseService),
+    );
+    const found = gate();
+    const release = gate();
+    jest
+      .spyOn(repository, 'findActiveByHash')
+      .mockImplementationOnce(async (tokenHash) => {
+        const result = await databaseRepository.findActiveByHash(tokenHash);
+        found.resolve();
+        await release.promise;
+        return result;
+      });
+
+    const pending = logout(tokens.refresh_token);
+    let rotated: TokenPair;
+    try {
+      await Promise.race([
+        found.promise,
+        pending.then(() => {
+          throw new Error('Logout завершился до контрольной точки');
+        }),
+      ]);
+      const response = await refresh(tokens.refresh_token);
+      expect(response.statusCode).toBe(201);
+      rotated = readTokens(response);
+    } finally {
+      release.resolve();
+    }
+
+    const response = await pending;
+    expect(response.statusCode).toBe(200);
+    expect((await refresh(rotated.refresh_token)).statusCode).toBe(401);
+  });
+
+  it('не обновляет токены, если logout завершился раньше refresh', async () => {
+    const { tokens } = await register();
+
+    const response = await logout(tokens.refresh_token);
+    expect(response.statusCode).toBe(200);
+    expect(response.cookies).toContainEqual(
+      expect.objectContaining({
+        name: 'refresh_token',
+        value: '',
+        path: '/auth',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Strict',
+        expires: new Date(0),
+      }),
+    );
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(401);
+    expect((await logout(tokens.refresh_token)).statusCode).toBe(401);
+  });
+
+  it('отзывает только выбранную сессию пользователя', async () => {
+    const { user, tokens } = await register();
+    const login = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { login: user.login, password: user.password },
+    });
+    expect(login.statusCode).toBe(201);
+    const anotherSession = readTokens(login);
+
+    expect((await logout(tokens.refresh_token)).statusCode).toBe(200);
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(401);
+    expect((await refresh(anotherSession.refresh_token)).statusCode).toBe(201);
+  });
+
+  it('не использует access для logout', async () => {
+    const { tokens } = await register();
+
+    expect((await logout(tokens.access_token)).statusCode).toBe(401);
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(201);
+  });
+
+  it('возвращает email только в собственном профиле', async () => {
+    const alice = await register();
+    const bob = await register();
+    const aliceHeaders = {
+      authorization: `Bearer ${alice.tokens.access_token}`,
+    };
+    const bobHeaders = { authorization: `Bearer ${bob.tokens.access_token}` };
+    const me = await app.inject({
+      method: 'GET',
+      url: '/users/me',
+      headers: bobHeaders,
+    });
+    expect(me.statusCode).toBe(200);
+    const profile = me.json<UserProfile>();
+    expect(profile.email).toBe(bob.user.email);
+    expect(profile).not.toHaveProperty('password_hash');
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/users',
+      query: { login: bob.user.login },
+      headers: aliceHeaders,
+    });
+    expect(list.statusCode).toBe(200);
+    const { items } = list.json<{ items: PublicUser[] }>();
+    expect(items).toContainEqual({
+      id: profile.id,
+      login: bob.user.login,
+      age: bob.user.age,
+      description: null,
+    });
+    for (const user of items) {
+      expect(user).not.toHaveProperty('email');
+      expect(user).not.toHaveProperty('password_hash');
+    }
+
+    const other = await app.inject({
+      method: 'GET',
+      url: `/users/${profile.id}`,
+      headers: aliceHeaders,
+    });
+    expect(other.statusCode).toBe(200);
+    expect(other.json<PublicUser>()).not.toHaveProperty('email');
+
+    const update = await app.inject({
+      method: 'PATCH',
+      url: `/users/${profile.id}`,
+      headers: bobHeaders,
+      payload: { age: 30 },
+    });
+    expect(update.statusCode).toBe(200);
+    expect(update.json<PublicUser>()).not.toHaveProperty('email');
+  });
+
+  describe('Маршруты пользователей', () => {
+    let owner: Awaited<ReturnType<typeof register>>;
+    let another: Awaited<ReturnType<typeof register>>;
+    let ownerId: number;
+
+    beforeAll(async () => {
+      owner = await register();
+      another = await register();
+      const storedUser = await database
+        .selectFrom('users')
+        .select('id')
+        .where('login', '=', owner.user.login)
+        .executeTakeFirstOrThrow();
+      ownerId = storedUser.id;
+    });
+
+    it('сохраняет изменения своего профиля в БД и возвращает их при чтении', async () => {
+      const headers = {
+        authorization: `Bearer ${owner.tokens.access_token}`,
+      };
+      const changes = { age: 30, description: 'Обновлённый профиль' };
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/users/${ownerId}`,
+        headers,
+        payload: changes,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json<PublicUser>()).toMatchObject(changes);
+
+      const storedUser = await database
+        .selectFrom('users')
+        .select(['age', 'description', 'deleted_at'])
+        .where('id', '=', ownerId)
+        .executeTakeFirstOrThrow();
+      expect(storedUser).toEqual({ ...changes, deleted_at: null });
+      const profile = await app.inject({
+        method: 'GET',
+        url: '/users/me',
+        headers,
+      });
+      expect(profile.statusCode).toBe(200);
+      expect(profile.json<UserProfile>()).toMatchObject(changes);
+    });
+
+    it.each(['PATCH', 'DELETE'] as const)(
+      '%s чужого профиля возвращает 403 и сохраняет пользователя и сессии',
+      async (method) => {
+        const findUser = () =>
+          database
+            .selectFrom('users')
+            .selectAll()
+            .where('id', '=', ownerId)
+            .executeTakeFirstOrThrow();
+        const findSessions = () =>
+          database
+            .selectFrom('refresh_tokens')
+            .selectAll()
+            .where('user_id', '=', ownerId)
+            .orderBy('session_id')
+            .execute();
+        const beforeUser = await findUser();
+        const beforeSessions = await findSessions();
+        expect(beforeSessions).toHaveLength(1);
+
+        const response = await app.inject({
+          method,
+          url: `/users/${ownerId}`,
+          headers: { authorization: `Bearer ${another.tokens.access_token}` },
+          ...(method === 'PATCH' ? { payload: { age: 40 } } : {}),
+        });
+
+        expect(response.statusCode).toBe(403);
+        expect(response.json<{ message: string[] }>().message).toEqual([
+          'Нет доступа к чужому профилю',
+        ]);
+        expect(await findUser()).toEqual(beforeUser);
+        expect(await findSessions()).toEqual(beforeSessions);
+      },
+    );
+
+    const methods = ['GET', 'PATCH', 'DELETE'] as const;
+    const invalidIds = [
+      '0',
+      '-1',
+      '2147483648',
+      '999999999999999999999',
+      '1.5',
+      'abc',
+    ];
+
+    it.each(
+      methods.flatMap((method) =>
+        invalidIds.map((id) => [method, id] as const),
+      ),
+    )('%s /users/%s возвращает 400', async (method, id) => {
+      const response = await app.inject({
+        method,
+        url: `/users/${id}`,
+        headers: { authorization: `Bearer ${owner.tokens.access_token}` },
+        ...(method === 'PATCH' ? { payload: { age: 30 } } : {}),
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it.each([
+      [1, 200],
+      [2147483647, 404],
+    ])('GET /users/%i возвращает %i для допустимого ID', async (id, status) => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/users/${id}`,
+        headers: { authorization: `Bearer ${owner.tokens.access_token}` },
+      });
+
+      expect(response.statusCode).toBe(status);
+      if (status === 200) {
+        expect(response.json<PublicUser>()).toMatchObject({
+          id: legacyUserId,
+          login: 'legacy',
+        });
+      }
+    });
+
+    it.each([
+      ['GET', ''],
+      ['GET', '/me'],
+      ['GET', '/:id'],
+      ['PATCH', '/:id'],
+      ['DELETE', '/:id'],
+    ] as const)(
+      '%s /users%s без авторизации возвращает 401',
+      async (method, path) => {
+        const response = await app.inject({
+          method,
+          url: `/users${path.replace(':id', String(ownerId))}`,
+          ...(method === 'PATCH' ? { payload: { age: 30 } } : {}),
+        });
+
+        expect(response.statusCode).toBe(401);
+        expect(response.json<{ message: string[] }>().message).toEqual([
+          'Требуется Bearer-токен',
+        ]);
+      },
+    );
+
+    it.each(['invalid', 'refresh'] as const)(
+      'отклоняет %s вместо access-токена',
+      async (type) => {
+        const token =
+          type === 'refresh' ? owner.tokens.refresh_token : 'invalid';
+        const response = await app.inject({
+          method: 'GET',
+          url: '/users/me',
+          headers: { authorization: `Bearer ${token}` },
+        });
+
+        expect(response.statusCode).toBe(401);
+      },
+    );
+  });
+});

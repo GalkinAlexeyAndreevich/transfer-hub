@@ -1,8 +1,42 @@
+import { StandardSchemaValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import {
+  FastifyAdapter,
+  type NestFastifyApplication,
+} from '@nestjs/platform-fastify';
+import type { ConfigType } from '@nestjs/config';
 import { AppModule } from './app.module';
+import appConfig from '@/config/app.config';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import cookie from '@fastify/cookie';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  await app.listen(process.env.PORT ?? 3000);
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter(),
+  );
+  await app.register(cookie);
+  const config = app.get<ConfigType<typeof appConfig>>(appConfig.KEY);
+  app.enableShutdownHooks();
+  app.useGlobalPipes(new StandardSchemaValidationPipe());
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Transfer Hub API')
+    .setDescription('API пользователей и авторизации')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .addCookieAuth('refresh_token')
+    .build();
+
+  const documentFactory = () =>
+    SwaggerModule.createDocument(app, swaggerConfig);
+
+  SwaggerModule.setup('docs', app, documentFactory);
+
+  await app.listen(config.port);
 }
-bootstrap();
+
+bootstrap().catch((error: unknown) => {
+  console.error('Не удалось запустить приложение:', error);
+  process.exit(1);
+});
