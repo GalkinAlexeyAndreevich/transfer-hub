@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '@/database/database.service';
-import { sql } from 'kysely';
+import { sql, type Kysely } from 'kysely';
+import type { Database } from '@/database/database.types';
 
 type RefreshSession = {
   userId: number;
@@ -27,38 +28,32 @@ export class RefreshTokensRepository {
       .executeTakeFirst();
   }
 
-  create({ userId, sessionId, tokenHash, expiresAt }: RefreshSession) {
-    return this.database.db.transaction().execute(async (trx) => {
-      const user = await trx
-        .selectFrom('users')
-        .select('id')
-        .where('id', '=', userId)
-        .where('deleted_at', 'is', null)
-        .forUpdate()
-        .executeTakeFirst();
-
-      if (!user) {
-        return false;
-      }
-
-      await trx
-        .insertInto('refresh_tokens')
-        .values({
-          session_id: sessionId,
-          user_id: userId,
-          token_hash: tokenHash,
-          expires_at: expiresAt,
-        })
-        .execute();
-
-      return true;
-    });
+  create(
+    { userId, sessionId, tokenHash, expiresAt }: RefreshSession,
+    db: Kysely<Database> = this.database.db,
+  ) {
+    return db
+      .insertInto('refresh_tokens')
+      .values({
+        session_id: sessionId,
+        user_id: userId,
+        token_hash: tokenHash,
+        expires_at: expiresAt,
+      })
+      .execute();
   }
 
   removeSession(userId: number, sessionId: string) {
     return this.database.db
       .deleteFrom('refresh_tokens')
       .where('session_id', '=', sessionId)
+      .where('user_id', '=', userId)
+      .execute();
+  }
+
+  removeAllForUser(userId: number, db: Kysely<Database> = this.database.db) {
+    return db
+      .deleteFrom('refresh_tokens')
       .where('user_id', '=', userId)
       .execute();
   }

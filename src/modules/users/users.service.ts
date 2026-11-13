@@ -4,6 +4,8 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersRepository } from './users.repository';
 import type { FindUsersQueryDto } from './dto/find-users.dto';
 import { hashPassword } from '@/common/helpers/password';
+import { DatabaseService } from '@/database/database.service';
+import { RefreshTokensRepository } from '@/modules/sessions/refresh-tokens.repository';
 import {
   CurrentUserNotFoundError,
   ProfileAccessDeniedError,
@@ -12,7 +14,11 @@ import {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly userRepository: UsersRepository) {}
+  constructor(
+    private readonly userRepository: UsersRepository,
+    private readonly refreshTokensRepository: RefreshTokensRepository,
+    private readonly database: DatabaseService,
+  ) {}
   async create(dto: CreateUserDto) {
     const passwordHash = await hashPassword(dto.password);
 
@@ -90,12 +96,16 @@ export class UsersService {
       throw new ProfileAccessDeniedError('Нельзя удалять чужой профиль');
     }
 
-    const user = await this.userRepository.remove(id);
+    return this.database.db.transaction().execute(async (trx) => {
+      const user = await this.userRepository.remove(id, trx);
 
-    if (!user) {
-      throw new UserNotFoundError('Пользователь не найден');
-    }
+      if (!user) {
+        throw new UserNotFoundError('Пользователь не найден');
+      }
 
-    return user;
+      await this.refreshTokensRepository.removeAllForUser(id, trx);
+
+      return user;
+    });
   }
 }

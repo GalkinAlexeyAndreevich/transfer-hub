@@ -24,7 +24,8 @@ import * as usersActiveUniqueIndexes from '@/database/migrations/006_users_activ
 import * as addRefreshTokensUserFk from '@/database/migrations/007_add_refresh_tokens_user_fk';
 import type { TokenPair } from '@/modules/auth/auth.service';
 import { hashToken } from '@/modules/auth/helpers/hash-token';
-import { RefreshTokensRepository } from '@/modules/auth/refresh-tokens.repository';
+import { RefreshTokensRepository } from '@/modules/sessions/refresh-tokens.repository';
+import { UsersRepository } from '@/modules/users/users.repository';
 
 type PublicUser = {
   id: number;
@@ -344,6 +345,148 @@ describe('Auth and users (PostgreSQL)', () => {
     expect(await findSessions()).toEqual([]);
     expect((await refresh(observer.tokens.refresh_token)).statusCode).toBe(201);
   });
+
+  it('откатывает soft delete и отзыв сессий при ошибке транзакции', async () => {
+    const { user, tokens } = await register();
+    const storedUser = await database
+      .selectFrom('users')
+      .selectAll()
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const findSessions = () =>
+      database
+        .selectFrom('refresh_tokens')
+        .selectAll()
+        .where('user_id', '=', storedUser.id)
+        .execute();
+    const sessions = await findSessions();
+    expect(sessions).toHaveLength(1);
+    const repository = app.get(RefreshTokensRepository);
+    const databaseRepository = new RefreshTokensRepository(
+      app.get<DatabaseService>(DatabaseService),
+    );
+    jest
+      .spyOn(repository, 'removeAllForUser')
+      .mockImplementationOnce(async (userId, trx) => {
+        await databaseRepository.removeAllForUser(userId, trx);
+        throw new Error('Ошибка после отзыва сессий');
+      });
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/users/${storedUser.id}`,
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(
+      await database
+        .selectFrom('users')
+        .selectAll()
+        .where('id', '=', storedUser.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual(storedUser);
+    expect(await findSessions()).toEqual(sessions);
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(201);
+  });
+
+  it.each(['до', 'после'] as const)(
+    'не оставляет сессию при удалении пользователя %s блокировки при входе',
+    async (deletionOrder) => {
+      const { user, tokens } = await register();
+      const storedUser = await database
+        .selectFrom('users')
+        .select('id')
+        .where('login', '=', user.login)
+        .executeTakeFirstOrThrow();
+      const repository = app.get(UsersRepository);
+      const databaseRepository = new UsersRepository(
+        app.get<DatabaseService>(DatabaseService),
+      );
+      const found = gate();
+      const release = gate();
+      jest
+        .spyOn(repository, 'findOneForUpdate')
+        .mockImplementationOnce(async (id, trx) => {
+          if (deletionOrder === 'до') {
+            found.resolve();
+            await release.promise;
+          }
+
+          const result = await databaseRepository.findOneForUpdate(id, trx);
+
+          if (deletionOrder === 'после') {
+            found.resolve();
+            await release.promise;
+          }
+
+          return result;
+        });
+
+      const pendingLogin = app
+        .inject({
+          method: 'POST',
+          url: '/auth/login',
+          payload: { login: user.login, password: user.password },
+        })
+        .then((response) => response);
+      let pendingDeletion: Promise<LightMyRequestResponse> | undefined;
+      try {
+        await Promise.race([
+          found.promise,
+          pendingLogin.then(() => {
+            throw new Error('Вход завершился до контрольной точки');
+          }),
+        ]);
+
+        if (deletionOrder === 'после') {
+          await expect(
+            database
+              .transaction()
+              .execute((trx) =>
+                trx
+                  .selectFrom('users')
+                  .select('id')
+                  .where('id', '=', storedUser.id)
+                  .forUpdate()
+                  .noWait()
+                  .execute(),
+              ),
+          ).rejects.toMatchObject({ code: '55P03' });
+        }
+
+        pendingDeletion = app
+          .inject({
+            method: 'DELETE',
+            url: `/users/${storedUser.id}`,
+            headers: { authorization: `Bearer ${tokens.access_token}` },
+          })
+          .then((response) => response);
+
+        if (deletionOrder === 'до') {
+          expect((await pendingDeletion).statusCode).toBe(200);
+        }
+      } finally {
+        release.resolve();
+      }
+
+      const response = await pendingLogin;
+      expect(response.statusCode).toBe(deletionOrder === 'до' ? 401 : 201);
+      expect((await pendingDeletion)?.statusCode).toBe(200);
+      expect(
+        await database
+          .selectFrom('refresh_tokens')
+          .selectAll()
+          .where('user_id', '=', storedUser.id)
+          .execute(),
+      ).toEqual([]);
+      if (response.statusCode === 201) {
+        expect(
+          (await refresh(readTokens(response).refresh_token)).statusCode,
+        ).toBe(401);
+      }
+    },
+  );
 
   it('отклоняет сессию с несуществующим user_id на уровне БД', async () => {
     await expect(

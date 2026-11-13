@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Insertable, Updateable } from 'kysely';
+import type { Insertable, Kysely, Transaction, Updateable } from 'kysely';
 import { DatabaseService } from '@/database/database.service';
 import type { Database } from '@/database/database.types';
 import { DatabaseError } from 'pg';
@@ -74,6 +74,16 @@ export class UsersRepository {
       .executeTakeFirst();
   }
 
+  findOneForUpdate(id: number, trx: Transaction<Database>) {
+    return trx
+      .selectFrom('users')
+      .select('id')
+      .where('id', '=', id)
+      .where('deleted_at', 'is', null)
+      .forUpdate()
+      .executeTakeFirst();
+  }
+
   findProfile(id: number) {
     return this.database.db
       .selectFrom('users')
@@ -106,27 +116,14 @@ export class UsersRepository {
     }
   }
 
-  remove(id: number) {
-    return this.database.db.transaction().execute(async (trx) => {
-      const user = await trx
-        .updateTable('users')
-        .set({ deleted_at: new Date() })
-        .where('id', '=', id)
-        .where('deleted_at', 'is', null)
-        .returning('id')
-        .executeTakeFirst();
-
-      if (!user) {
-        return undefined;
-      }
-
-      await trx
-        .deleteFrom('refresh_tokens')
-        .where('user_id', '=', id)
-        .execute();
-
-      return user;
-    });
+  remove(id: number, db: Kysely<Database> = this.database.db) {
+    return db
+      .updateTable('users')
+      .set({ deleted_at: new Date() })
+      .where('id', '=', id)
+      .where('deleted_at', 'is', null)
+      .returning('id')
+      .executeTakeFirst();
   }
 
   private uniqueUserError(error: unknown): never {

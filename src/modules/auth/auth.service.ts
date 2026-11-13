@@ -2,7 +2,9 @@ import { verifyPassword } from '@/common/helpers/password';
 import { Injectable } from '@nestjs/common';
 import { CreateUserDto } from '@/modules/users/dto/create-user.dto';
 import { UsersService } from '@/modules/users/users.service';
-import { RefreshTokensRepository } from './refresh-tokens.repository';
+import { UsersRepository } from '@/modules/users/users.repository';
+import { RefreshTokensRepository } from '@/modules/sessions/refresh-tokens.repository';
+import { DatabaseService } from '@/database/database.service';
 import { TokenService } from '../token/token.service';
 import { hashToken } from './helpers/hash-token';
 import { AUTH_MESSAGES } from './constants/messages';
@@ -28,6 +30,8 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly refreshTokensRepository: RefreshTokensRepository,
     private readonly tokenService: TokenService,
+    private readonly usersRepository: UsersRepository,
+    private readonly database: DatabaseService,
   ) {}
 
   async register(dto: CreateUserDto): Promise<AuthSession> {
@@ -107,16 +111,23 @@ export class AuthService {
     const { tokens, refreshExpiresAt, sessionId } =
       await this.tokenService.generateTokens(userId);
 
-    const created = await this.refreshTokensRepository.create({
-      userId,
-      sessionId,
-      tokenHash: hashToken(tokens.refresh_token),
-      expiresAt: refreshExpiresAt,
-    });
+    await this.database.db.transaction().execute(async (trx) => {
+      const user = await this.usersRepository.findOneForUpdate(userId, trx);
 
-    if (!created) {
-      throw new CurrentUserNotFoundError(AUTH_MESSAGES.USER_NOT_FOUND);
-    }
+      if (!user) {
+        throw new CurrentUserNotFoundError(AUTH_MESSAGES.USER_NOT_FOUND);
+      }
+
+      await this.refreshTokensRepository.create(
+        {
+          userId,
+          sessionId,
+          tokenHash: hashToken(tokens.refresh_token),
+          expiresAt: refreshExpiresAt,
+        },
+        trx,
+      );
+    });
 
     return { tokens, refreshExpiresAt };
   }
