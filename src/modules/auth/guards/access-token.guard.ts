@@ -3,6 +3,8 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { TokenService } from '../../token/token.service';
+import { AUTH_MESSAGES } from '../constants/messages';
+import { CurrentUserNotFoundError } from '@/modules/users/errors/user.errors';
 
 export type AuthUser = {
   id: number;
@@ -26,7 +28,7 @@ export class AccessTokenGuard implements CanActivate {
     const token = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
 
     if (!token) {
-      throw new UnauthorizedException('Требуется Bearer-токен');
+      throw new UnauthorizedException(AUTH_MESSAGES.BEARER_TOKEN_REQUIRED);
     }
 
     const { userId } = await this.tokenService.verifyAccessToken(token);
@@ -34,7 +36,7 @@ export class AccessTokenGuard implements CanActivate {
     const user = await this.usersService.findOne(userId);
 
     if (!user) {
-      throw new UnauthorizedException('Пользователя не существует');
+      throw new CurrentUserNotFoundError();
     }
 
     request.user = {

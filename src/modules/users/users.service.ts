@@ -61,7 +61,7 @@ export class UsersService {
     const user = await this.findOne(id);
 
     if (!user) {
-      throw new UserNotFoundError('Пользователь не найден');
+      throw new UserNotFoundError();
     }
 
     return user;
@@ -71,7 +71,7 @@ export class UsersService {
     const user = await this.userRepository.findProfile(id);
 
     if (!user) {
-      throw new CurrentUserNotFoundError('Пользователь не найден');
+      throw new CurrentUserNotFoundError();
     }
 
     return user;
@@ -79,13 +79,13 @@ export class UsersService {
 
   async update(id: number, dto: UpdateUserDto, initiatorId: number) {
     if (initiatorId !== id) {
-      throw new ProfileAccessDeniedError('Нельзя изменять чужой профиль');
+      throw new ProfileAccessDeniedError();
     }
 
     const user = await this.userRepository.update(id, dto);
 
     if (!user) {
-      throw new UserNotFoundError('Пользователь не найден');
+      throw new UserNotFoundError();
     }
 
     return user;
@@ -93,14 +93,14 @@ export class UsersService {
 
   async remove(id: number, initiatorId: number) {
     if (initiatorId !== id) {
-      throw new ProfileAccessDeniedError('Нельзя удалять чужой профиль');
+      throw new ProfileAccessDeniedError();
     }
 
     return this.database.db.transaction().execute(async (trx) => {
       const user = await this.userRepository.remove(id, trx);
 
       if (!user) {
-        throw new UserNotFoundError('Пользователь не найден');
+        throw new UserNotFoundError();
       }
 
       await this.refreshTokensRepository.removeAllForUser(id, trx);

@@ -133,10 +133,7 @@ export class UsersRepository {
       (error.constraint === 'users_login_active_uq' ||
         error.constraint === 'users_email_active_uq')
     ) {
-      throw new UserAlreadyExistsError(
-        'Пользователь с таким email или login уже существует',
-        { cause: error },
-      );
+      throw new UserAlreadyExistsError(undefined, { cause: error });
     }
 
     throw error;

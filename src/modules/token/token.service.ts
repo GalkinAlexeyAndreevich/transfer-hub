@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import jwtConfig from '@/config/jwt.config';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { InvalidTokenError } from './errors/token.errors';
+import { TOKEN_MESSAGES } from './constants/messages';
 
 export type VerifiedToken = {
   userId: number;
@@ -58,15 +59,13 @@ export class TokenService {
         algorithms: ['HS256'],
       });
     } catch (error: unknown) {
-      throw new InvalidTokenError('Access token недействителен или истёк', {
+      throw new InvalidTokenError(undefined, {
         cause: error,
       });
     }
 
-    const invalidPayloadMessage = 'Некорректный access token';
-
     if (!payload) {
-      throw new InvalidTokenError(invalidPayloadMessage);
+      throw new InvalidTokenError(TOKEN_MESSAGES.INVALID_ACCESS_TOKEN_PAYLOAD);
     }
 
     if (
@@ -76,13 +75,13 @@ export class TokenService {
       typeof payload.jti !== 'string' ||
       !payload.jti
     ) {
-      throw new InvalidTokenError(invalidPayloadMessage);
+      throw new InvalidTokenError(TOKEN_MESSAGES.INVALID_ACCESS_TOKEN_PAYLOAD);
     }
 
     const userId = Number(payload.sub);
 
     if (!Number.isSafeInteger(userId) || userId <= 0) {
-      throw new InvalidTokenError(invalidPayloadMessage);
+      throw new InvalidTokenError(TOKEN_MESSAGES.INVALID_ACCESS_TOKEN_PAYLOAD);
     }
 
     return {

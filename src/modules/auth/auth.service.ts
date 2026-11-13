@@ -7,7 +7,6 @@ import { RefreshTokensRepository } from '@/modules/sessions/refresh-tokens.repos
 import { DatabaseService } from '@/database/database.service';
 import { TokenService } from '../token/token.service';
 import { hashToken } from './helpers/hash-token';
-import { AUTH_MESSAGES } from './constants/messages';
 import { CurrentUserNotFoundError } from '@/modules/users/errors/user.errors';
 import {
   InvalidCredentialsError,
@@ -44,13 +43,13 @@ export class AuthService {
     const user = await this.usersService.findAuthInfoByLogin(login);
 
     if (!user) {
-      throw new InvalidCredentialsError(AUTH_MESSAGES.INVALID_CREDENTIALS);
+      throw new InvalidCredentialsError();
     }
 
     const isValidPassword = await verifyPassword(user.password_hash, password);
 
     if (!isValidPassword) {
-      throw new InvalidCredentialsError(AUTH_MESSAGES.INVALID_CREDENTIALS);
+      throw new InvalidCredentialsError();
     }
 
     return this.startSession(user.id);
@@ -72,7 +71,7 @@ export class AuthService {
     const user = await this.usersService.findOne(userId);
 
     if (!user) {
-      throw new CurrentUserNotFoundError(AUTH_MESSAGES.USER_NOT_FOUND);
+      throw new CurrentUserNotFoundError();
     }
 
     const { tokens, refreshExpiresAt } = await this.tokenService.generateTokens(
@@ -89,7 +88,7 @@ export class AuthService {
     });
 
     if (!rotated) {
-      throw new RefreshTokenInactiveError(AUTH_MESSAGES.SESSION_EXPIRED);
+      throw new RefreshTokenInactiveError();
     }
 
     return { tokens, refreshExpiresAt };
@@ -101,7 +100,7 @@ export class AuthService {
     );
 
     if (!session) {
-      throw new RefreshTokenInactiveError(AUTH_MESSAGES.SESSION_EXPIRED);
+      throw new RefreshTokenInactiveError();
     }
 
     return session;
@@ -115,7 +114,7 @@ export class AuthService {
       const user = await this.usersRepository.findOneForUpdate(userId, trx);
 
       if (!user) {
-        throw new CurrentUserNotFoundError(AUTH_MESSAGES.USER_NOT_FOUND);
+        throw new CurrentUserNotFoundError();
       }
 
       await this.refreshTokensRepository.create(

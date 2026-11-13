@@ -236,6 +236,9 @@ describe('Auth and users (PostgreSQL)', () => {
     });
 
     expect(response.statusCode).toBe(401);
+    expect(response.json<{ message: string[] }>().message).toEqual([
+      'Неверный логин или пароль',
+    ]);
     expect(await findSessions()).toEqual(before);
   });
 
@@ -258,6 +261,9 @@ describe('Auth and users (PostgreSQL)', () => {
       });
 
       expect(response.statusCode).toBe(409);
+      expect(response.json<{ message: string[] }>().message).toEqual([
+        'Пользователь с таким email или login уже существует',
+      ]);
       const after = await database
         .selectFrom('users')
         .selectAll()
@@ -313,6 +319,9 @@ describe('Auth and users (PostgreSQL)', () => {
       headers: observerHeaders,
     });
     expect(profile.statusCode).toBe(404);
+    expect(profile.json<{ message: string[] }>().message).toEqual([
+      'Пользователь не найден',
+    ]);
     const list = await app.inject({
       method: 'GET',
       url: '/users',
@@ -334,6 +343,9 @@ describe('Auth and users (PostgreSQL)', () => {
         headers: { authorization: `Bearer ${session.access_token}` },
       });
       expect(me.statusCode).toBe(401);
+      expect(me.json<{ message: string[] }>().message).toEqual([
+        'Пользователь не найден',
+      ]);
       expect((await refresh(session.refresh_token)).statusCode).toBe(401);
     }
     const relogin = await app.inject({
@@ -864,6 +876,9 @@ describe('Auth and users (PostgreSQL)', () => {
         });
 
         expect(response.statusCode).toBe(403);
+        expect(response.json<{ message: string[] }>().message).toEqual([
+          'Нет доступа к чужому профилю',
+        ]);
         expect(await findUser()).toEqual(beforeUser);
         expect(await findSessions()).toEqual(beforeSessions);
       },
@@ -929,6 +944,9 @@ describe('Auth and users (PostgreSQL)', () => {
         });
 
         expect(response.statusCode).toBe(401);
+        expect(response.json<{ message: string[] }>().message).toEqual([
+          'Требуется Bearer-токен',
+        ]);
       },
     );
 

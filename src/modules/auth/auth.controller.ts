@@ -56,7 +56,7 @@ export class AuthController {
       'Проверяет логин и пароль, возвращает access_token и устанавливает refresh_token в HttpOnly cookie.',
   })
   @ApiCreatedResponse({ description: 'Вход выполнен, токены выданы' })
-  @ApiUnauthorizedResponse({ description: 'Неверный логин или пароль' })
+  @ApiUnauthorizedResponse({ description: AUTH_MESSAGES.INVALID_CREDENTIALS })
   @Post('login')
   async login(
     @Body({ schema: loginSchema }) dto: LoginDto,
@@ -97,7 +97,7 @@ export class AuthController {
     const refreshToken = request.cookies.refresh_token;
 
     if (!refreshToken) {
-      throw new RefreshTokenInactiveError(AUTH_MESSAGES.SESSION_EXPIRED);
+      throw new RefreshTokenInactiveError();
     }
 
     return refreshToken;
