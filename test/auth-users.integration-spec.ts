@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import cookie from '@fastify/cookie';
+import type { LightMyRequestResponse } from 'fastify';
 import { StandardSchemaValidationPipe } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import {
@@ -23,7 +25,6 @@ import * as addRefreshTokensUserFk from '@/database/migrations/007_add_refresh_t
 import type { TokenPair } from '@/modules/auth/auth.service';
 import { hashToken } from '@/modules/auth/helpers/hash-token';
 import { RefreshTokensRepository } from '@/modules/auth/refresh-tokens.repository';
-import { TokenService } from '@/modules/token/token.service';
 
 type PublicUser = {
   id: number;
@@ -127,6 +128,7 @@ describe('Auth and users (PostgreSQL)', () => {
     app = module.createNestApplication<NestFastifyApplication>(adapter, {
       logger: false,
     });
+    await app.register(cookie);
     app.useGlobalPipes(new StandardSchemaValidationPipe());
     await app.init();
     await adapter.getInstance().ready();
@@ -171,14 +173,33 @@ describe('Auth and users (PostgreSQL)', () => {
     });
     expect(response.statusCode).toBe(201);
 
-    return { user, tokens: response.json<TokenPair>() };
+    return { user, tokens: readTokens(response) };
+  }
+
+  function readTokens(response: LightMyRequestResponse): TokenPair {
+    const tokens = response.json<{ access_token: string }>();
+    expect(Object.keys(tokens)).toEqual(['access_token']);
+    expect(typeof tokens.access_token).toBe('string');
+    const refreshCookie = response.cookies.find(
+      (cookie) => cookie.name === 'refresh_token',
+    );
+    expect(refreshCookie).toMatchObject({
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Strict',
+      path: '/auth',
+    });
+    expect(refreshCookie?.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(refreshCookie?.expires).toBeInstanceOf(Date);
+
+    return { ...tokens, refresh_token: refreshCookie!.value };
   }
 
   function refresh(token: string) {
     return app.inject({
       method: 'POST',
       url: '/auth/refresh-token',
-      payload: { refresh_token: token },
+      cookies: { refresh_token: token },
     });
   }
 
@@ -186,7 +207,7 @@ describe('Auth and users (PostgreSQL)', () => {
     return app.inject({
       method: 'POST',
       url: '/auth/logout',
-      payload: { refresh_token: token },
+      cookies: { refresh_token: token },
     });
   }
 
@@ -262,7 +283,7 @@ describe('Auth and users (PostgreSQL)', () => {
       payload: { login: user.login, password: user.password },
     });
     expect(login.statusCode).toBe(201);
-    const anotherSession = login.json<TokenPair>();
+    const anotherSession = readTokens(login);
     const findSessions = () =>
       database
         .selectFrom('refresh_tokens')
@@ -425,25 +446,60 @@ describe('Auth and users (PostgreSQL)', () => {
 
   it('ротирует одноразовый refresh в пределах одного sid и хранит хеш', async () => {
     const { tokens } = await register();
-    const tokenService = app.get(TokenService);
-    const initial = await tokenService.verifyRefreshToken(tokens.refresh_token);
+    const initial = await database
+      .selectFrom('refresh_tokens')
+      .select('session_id')
+      .where('token_hash', '=', hashToken(tokens.refresh_token))
+      .executeTakeFirstOrThrow();
     const response = await refresh(tokens.refresh_token);
     expect(response.statusCode).toBe(201);
-    const rotated = response.json<TokenPair>();
-    const verified = await tokenService.verifyRefreshToken(
-      rotated.refresh_token,
-    );
-    expect(verified.sessionId).toBe(initial.sessionId);
+    const rotated = readTokens(response);
     expect(rotated.refresh_token).not.toBe(tokens.refresh_token);
     expect((await refresh(tokens.refresh_token)).statusCode).toBe(401);
 
     const stored = await database
       .selectFrom('refresh_tokens')
-      .select('token_hash')
-      .where('session_id', '=', initial.sessionId)
+      .select(['token_hash', 'expires_at'])
+      .where('session_id', '=', initial.session_id)
       .executeTakeFirstOrThrow();
     expect(stored.token_hash).toBe(hashToken(rotated.refresh_token));
     expect(stored.token_hash).not.toBe(rotated.refresh_token);
+    expect(response.cookies[0].expires).toEqual(stored.expires_at);
+  });
+
+  it.each(['refresh-token', 'logout'])(
+    'читает refresh для %s из cookie и отклоняет токен только в теле',
+    async (route) => {
+      const { tokens } = await register();
+      const response = await app.inject({
+        method: 'POST',
+        url: `/auth/${route}`,
+        payload: { refresh_token: tokens.refresh_token },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect((await refresh(tokens.refresh_token)).statusCode).toBe(201);
+    },
+  );
+
+  it('проверяет срок refresh в БД', async () => {
+    const { tokens } = await register();
+    await database
+      .updateTable('refresh_tokens')
+      .set({ expires_at: new Date(Date.now() - 1000) })
+      .where('token_hash', '=', hashToken(tokens.refresh_token))
+      .execute();
+
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(401);
+    expect((await logout(tokens.refresh_token)).statusCode).toBe(401);
+  });
+
+  it('отклоняет неизвестный refresh и access вместо refresh', async () => {
+    const { tokens } = await register();
+
+    expect((await refresh(randomUUID())).statusCode).toBe(401);
+    expect((await refresh(tokens.access_token)).statusCode).toBe(401);
+    expect((await refresh(tokens.refresh_token)).statusCode).toBe(201);
   });
 
   it('позволяет только один из двух одновременных refresh', async () => {
@@ -458,46 +514,62 @@ describe('Auth and users (PostgreSQL)', () => {
     ]);
   });
 
-  it('logout отзывает новую пару, когда refresh уже заменил хеш', async () => {
+  it('logout отзывает ротированную сессию, найденную до замены хеша', async () => {
     const { tokens } = await register();
     const repository = app.get(RefreshTokensRepository);
     const databaseRepository = new RefreshTokensRepository(
       app.get<DatabaseService>(DatabaseService),
     );
-    const updated = gate();
+    const found = gate();
     const release = gate();
-    jest.spyOn(repository, 'rotate').mockImplementationOnce(async (params) => {
-      const result = await databaseRepository.rotate(params);
-      updated.resolve();
-      await release.promise;
-      return result;
-    });
+    jest
+      .spyOn(repository, 'findActiveByHash')
+      .mockImplementationOnce(async (tokenHash) => {
+        const result = await databaseRepository.findActiveByHash(tokenHash);
+        found.resolve();
+        await release.promise;
+        return result;
+      });
 
-    const pending = refresh(tokens.refresh_token);
+    const pending = logout(tokens.refresh_token);
+    let rotated: TokenPair;
     try {
       await Promise.race([
-        updated.promise,
+        found.promise,
         pending.then(() => {
-          throw new Error('Refresh завершился до контрольной точки');
+          throw new Error('Logout завершился до контрольной точки');
         }),
       ]);
-      expect((await logout(tokens.refresh_token)).statusCode).toBe(200);
+      const response = await refresh(tokens.refresh_token);
+      expect(response.statusCode).toBe(201);
+      rotated = readTokens(response);
     } finally {
       release.resolve();
     }
 
     const response = await pending;
-    expect(response.statusCode).toBe(201);
-    const rotated = response.json<TokenPair>();
+    expect(response.statusCode).toBe(200);
     expect((await refresh(rotated.refresh_token)).statusCode).toBe(401);
   });
 
   it('не обновляет токены, если logout завершился раньше refresh', async () => {
     const { tokens } = await register();
 
-    expect((await logout(tokens.refresh_token)).statusCode).toBe(200);
+    const response = await logout(tokens.refresh_token);
+    expect(response.statusCode).toBe(200);
+    expect(response.cookies).toContainEqual(
+      expect.objectContaining({
+        name: 'refresh_token',
+        value: '',
+        path: '/auth',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Strict',
+        expires: new Date(0),
+      }),
+    );
     expect((await refresh(tokens.refresh_token)).statusCode).toBe(401);
-    expect((await logout(tokens.refresh_token)).statusCode).toBe(200);
+    expect((await logout(tokens.refresh_token)).statusCode).toBe(401);
   });
 
   it('отзывает только выбранную сессию пользователя', async () => {
@@ -508,7 +580,7 @@ describe('Auth and users (PostgreSQL)', () => {
       payload: { login: user.login, password: user.password },
     });
     expect(login.statusCode).toBe(201);
-    const anotherSession = login.json<TokenPair>();
+    const anotherSession = readTokens(login);
 
     expect((await logout(tokens.refresh_token)).statusCode).toBe(200);
     expect((await refresh(tokens.refresh_token)).statusCode).toBe(401);

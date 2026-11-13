@@ -5,7 +5,6 @@ import { InvalidTokenError } from './errors/token.errors';
 describe('TokenService', () => {
   const config = {
     JWT_SECRET: 'a'.repeat(64),
-    JWT_REFRESH_SECRET: 'b'.repeat(64),
     ACCESS_TTL_SECONDS: 900,
     REFRESH_TTL_SECONDS: 2_592_000,
   };
@@ -16,10 +15,15 @@ describe('TokenService', () => {
     const initial = await service.generateTokens(1);
     const rotated = await service.generateTokens(1, initial.sessionId);
 
+    expect(rotated.sessionId).toBe(initial.sessionId);
+    expect(initial.tokens.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Buffer.from(initial.tokens.refresh_token, 'base64url')).toHaveLength(
+      32,
+    );
     expect(rotated.tokens.refresh_token).not.toBe(initial.tokens.refresh_token);
     await expect(
-      service.verifyRefreshToken(rotated.tokens.refresh_token),
-    ).resolves.toMatchObject({ userId: 1, sessionId: initial.sessionId });
+      service.verifyAccessToken(rotated.tokens.access_token),
+    ).resolves.toMatchObject({ userId: 1 });
   });
 
   it('создаёт разные sid для независимых входов', async () => {
@@ -31,26 +35,35 @@ describe('TokenService', () => {
     expect(first.sessionId).not.toBe(second.sessionId);
   });
 
-  it.each([undefined, null, '', 'not-a-uuid'])(
-    'отклоняет refresh с некорректным sid: %p',
-    async (sid) => {
+  it('задаёт срок refresh по конфигурации', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const { refreshExpiresAt } = await service.generateTokens(1);
+
+    expect(refreshExpiresAt.getTime()).toBeGreaterThanOrEqual(
+      (now + config.REFRESH_TTL_SECONDS) * 1000,
+    );
+    expect(refreshExpiresAt.getTime()).toBeLessThanOrEqual(
+      Date.now() + config.REFRESH_TTL_SECONDS * 1000,
+    );
+  });
+
+  it.each([undefined, null, '', 'refresh'])(
+    'отклоняет access с некорректным типом: %p',
+    async (type) => {
       const token = jwt.sign(
-        { sub: '1', type: 'refresh', jti: 'test', sid },
-        { secret: config.JWT_REFRESH_SECRET, expiresIn: 60 },
+        { sub: '1', type, jti: 'test' },
+        { secret: config.JWT_SECRET, expiresIn: 60 },
       );
 
-      await expect(service.verifyRefreshToken(token)).rejects.toBeInstanceOf(
+      await expect(service.verifyAccessToken(token)).rejects.toBeInstanceOf(
         InvalidTokenError,
       );
     },
   );
 
-  it('не позволяет взаимозаменять access и refresh', async () => {
+  it('отклоняет refresh вместо access', async () => {
     const { tokens } = await service.generateTokens(1);
 
-    await expect(
-      service.verifyRefreshToken(tokens.access_token),
-    ).rejects.toBeInstanceOf(InvalidTokenError);
     await expect(
       service.verifyAccessToken(tokens.refresh_token),
     ).rejects.toBeInstanceOf(InvalidTokenError);

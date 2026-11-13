@@ -17,6 +17,11 @@ export type TokenPair = {
   refresh_token: string;
 };
 
+export type AuthSession = {
+  tokens: TokenPair;
+  refreshExpiresAt: Date;
+};
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -25,13 +30,13 @@ export class AuthService {
     private readonly tokenService: TokenService,
   ) {}
 
-  async register(dto: CreateUserDto): Promise<TokenPair> {
+  async register(dto: CreateUserDto): Promise<AuthSession> {
     const user = await this.usersService.create(dto);
 
     return this.startSession(user.id);
   }
 
-  async login(login: string, password: string): Promise<TokenPair> {
+  async login(login: string, password: string): Promise<AuthSession> {
     const user = await this.usersService.findAuthInfoByLogin(login);
 
     if (!user) {
@@ -48,15 +53,17 @@ export class AuthService {
   }
 
   async logout(refreshToken: string): Promise<void> {
-    const { userId, sessionId } =
-      await this.tokenService.verifyRefreshToken(refreshToken);
+    const session = await this.findRefreshSession(refreshToken);
 
-    await this.refreshTokensRepository.removeSession(userId, sessionId);
+    await this.refreshTokensRepository.removeSession(
+      session.user_id,
+      session.session_id,
+    );
   }
 
-  async refreshTokens(refreshToken: string): Promise<TokenPair> {
-    const { userId, sessionId } =
-      await this.tokenService.verifyRefreshToken(refreshToken);
+  async refreshTokens(refreshToken: string): Promise<AuthSession> {
+    const { user_id: userId, session_id: sessionId } =
+      await this.findRefreshSession(refreshToken);
 
     const user = await this.usersService.findOne(userId);
 
@@ -81,10 +88,22 @@ export class AuthService {
       throw new RefreshTokenInactiveError(AUTH_MESSAGES.SESSION_EXPIRED);
     }
 
-    return tokens;
+    return { tokens, refreshExpiresAt };
   }
 
-  private async startSession(userId: number): Promise<TokenPair> {
+  private async findRefreshSession(refreshToken: string) {
+    const session = await this.refreshTokensRepository.findActiveByHash(
+      hashToken(refreshToken),
+    );
+
+    if (!session) {
+      throw new RefreshTokenInactiveError(AUTH_MESSAGES.SESSION_EXPIRED);
+    }
+
+    return session;
+  }
+
+  private async startSession(userId: number): Promise<AuthSession> {
     const { tokens, refreshExpiresAt, sessionId } =
       await this.tokenService.generateTokens(userId);
 
@@ -99,6 +118,6 @@ export class AuthService {
       throw new CurrentUserNotFoundError(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
-    return tokens;
+    return { tokens, refreshExpiresAt };
   }
 }

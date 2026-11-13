@@ -8,12 +8,14 @@ import type { ConfigType } from '@nestjs/config';
 import { AppModule } from './app.module';
 import appConfig from '@/config/app.config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import cookie from '@fastify/cookie';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter(),
   );
+  await app.register(cookie);
   const config = app.get<ConfigType<typeof appConfig>>(appConfig.KEY);
   app.enableShutdownHooks();
   app.useGlobalPipes(new StandardSchemaValidationPipe());
@@ -23,6 +25,7 @@ async function bootstrap() {
     .setDescription('API пользователей и авторизации')
     .setVersion('1.0')
     .addBearerAuth()
+    .addCookieAuth('refresh_token')
     .build();
 
   const documentFactory = () =>

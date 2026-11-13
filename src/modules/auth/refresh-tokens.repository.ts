@@ -18,6 +18,15 @@ type RefreshRotation = Omit<RefreshSession, 'tokenHash'> & {
 export class RefreshTokensRepository {
   constructor(private readonly database: DatabaseService) {}
 
+  findActiveByHash(tokenHash: string) {
+    return this.database.db
+      .selectFrom('refresh_tokens')
+      .select(['user_id', 'session_id'])
+      .where('token_hash', '=', tokenHash)
+      .where('expires_at', '>', sql<Date>`now()`)
+      .executeTakeFirst();
+  }
+
   create({ userId, sessionId, tokenHash, expiresAt }: RefreshSession) {
     return this.database.db.transaction().execute(async (trx) => {
       const user = await trx
