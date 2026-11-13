@@ -43,7 +43,7 @@ function gate() {
   return { promise, resolve };
 }
 
-describe('Auth sessions and user privacy (PostgreSQL)', () => {
+describe('Auth and users (PostgreSQL)', () => {
   const schema = `test_auth_${randomUUID().replaceAll('-', '')}`;
   const legacyHash = 'a'.repeat(64);
   let app: NestFastifyApplication;
@@ -189,6 +189,140 @@ describe('Auth sessions and user privacy (PostgreSQL)', () => {
       payload: { refresh_token: token },
     });
   }
+
+  it('не создаёт сессию при входе с неверным паролем', async () => {
+    const { user } = await register();
+    const storedUser = await database
+      .selectFrom('users')
+      .select('id')
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const findSessions = () =>
+      database
+        .selectFrom('refresh_tokens')
+        .selectAll()
+        .where('user_id', '=', storedUser.id)
+        .orderBy('session_id')
+        .execute();
+    const before = await findSessions();
+    expect(before).toHaveLength(1);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { login: user.login, password: 'WrongPassword123!' },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(await findSessions()).toEqual(before);
+  });
+
+  it.each(['login', 'email'] as const)(
+    'возвращает 409 при обновлении на занятый %s и сохраняет исходные данные',
+    async (field) => {
+      const owner = await register();
+      const occupied = await register();
+      const before = await database
+        .selectFrom('users')
+        .selectAll()
+        .where('login', '=', owner.user.login)
+        .executeTakeFirstOrThrow();
+
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/users/${before.id}`,
+        headers: { authorization: `Bearer ${owner.tokens.access_token}` },
+        payload: { [field]: occupied.user[field], age: 30 },
+      });
+
+      expect(response.statusCode).toBe(409);
+      const after = await database
+        .selectFrom('users')
+        .selectAll()
+        .where('id', '=', before.id)
+        .executeTakeFirstOrThrow();
+      expect(after).toEqual(before);
+    },
+  );
+
+  it('soft delete скрывает пользователя и отзывает все его сессии', async () => {
+    const { user, tokens } = await register();
+    const observer = await register();
+    const observerHeaders = {
+      authorization: `Bearer ${observer.tokens.access_token}`,
+    };
+    const storedUser = await database
+      .selectFrom('users')
+      .select('id')
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const login = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { login: user.login, password: user.password },
+    });
+    expect(login.statusCode).toBe(201);
+    const anotherSession = login.json<TokenPair>();
+    const findSessions = () =>
+      database
+        .selectFrom('refresh_tokens')
+        .select('session_id')
+        .where('user_id', '=', storedUser.id)
+        .execute();
+    expect(await findSessions()).toHaveLength(2);
+
+    const removed = await app.inject({
+      method: 'DELETE',
+      url: `/users/${storedUser.id}`,
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+    expect(removed.statusCode).toBe(200);
+    const deleted = await database
+      .selectFrom('users')
+      .select('deleted_at')
+      .where('id', '=', storedUser.id)
+      .executeTakeFirstOrThrow();
+    expect(deleted.deleted_at).toBeInstanceOf(Date);
+    expect(await findSessions()).toEqual([]);
+
+    const profile = await app.inject({
+      method: 'GET',
+      url: `/users/${storedUser.id}`,
+      headers: observerHeaders,
+    });
+    expect(profile.statusCode).toBe(404);
+    const list = await app.inject({
+      method: 'GET',
+      url: '/users',
+      query: { login: user.login },
+      headers: observerHeaders,
+    });
+    expect(list.statusCode).toBe(200);
+    expect(
+      list.json<{ items: PublicUser[]; meta: { total: number } }>(),
+    ).toMatchObject({
+      items: [],
+      meta: { total: 0 },
+    });
+
+    for (const session of [tokens, anotherSession]) {
+      const me = await app.inject({
+        method: 'GET',
+        url: '/users/me',
+        headers: { authorization: `Bearer ${session.access_token}` },
+      });
+      expect(me.statusCode).toBe(401);
+      expect((await refresh(session.refresh_token)).statusCode).toBe(401);
+    }
+    const relogin = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { login: user.login, password: user.password },
+    });
+    expect(relogin.statusCode).toBe(401);
+    expect(await findSessions()).toEqual([]);
+    expect((await refresh(observer.tokens.refresh_token)).statusCode).toBe(201);
+  });
 
   it('отклоняет сессию с несуществующим user_id на уровне БД', async () => {
     await expect(
@@ -408,6 +542,7 @@ describe('Auth sessions and user privacy (PostgreSQL)', () => {
     const list = await app.inject({
       method: 'GET',
       url: '/users',
+      query: { login: bob.user.login },
       headers: aliceHeaders,
     });
     expect(list.statusCode).toBe(200);
@@ -439,5 +574,162 @@ describe('Auth sessions and user privacy (PostgreSQL)', () => {
     });
     expect(update.statusCode).toBe(200);
     expect(update.json<PublicUser>()).not.toHaveProperty('email');
+  });
+
+  describe('Маршруты пользователей', () => {
+    let owner: Awaited<ReturnType<typeof register>>;
+    let another: Awaited<ReturnType<typeof register>>;
+    let ownerId: number;
+
+    beforeAll(async () => {
+      owner = await register();
+      another = await register();
+      const storedUser = await database
+        .selectFrom('users')
+        .select('id')
+        .where('login', '=', owner.user.login)
+        .executeTakeFirstOrThrow();
+      ownerId = storedUser.id;
+    });
+
+    it('сохраняет изменения своего профиля в БД и возвращает их при чтении', async () => {
+      const headers = {
+        authorization: `Bearer ${owner.tokens.access_token}`,
+      };
+      const changes = { age: 30, description: 'Обновлённый профиль' };
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/users/${ownerId}`,
+        headers,
+        payload: changes,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json<PublicUser>()).toMatchObject(changes);
+
+      const storedUser = await database
+        .selectFrom('users')
+        .select(['age', 'description', 'deleted_at'])
+        .where('id', '=', ownerId)
+        .executeTakeFirstOrThrow();
+      expect(storedUser).toEqual({ ...changes, deleted_at: null });
+      const profile = await app.inject({
+        method: 'GET',
+        url: '/users/me',
+        headers,
+      });
+      expect(profile.statusCode).toBe(200);
+      expect(profile.json<UserProfile>()).toMatchObject(changes);
+    });
+
+    it.each(['PATCH', 'DELETE'] as const)(
+      '%s чужого профиля возвращает 403 и сохраняет пользователя и сессии',
+      async (method) => {
+        const findUser = () =>
+          database
+            .selectFrom('users')
+            .selectAll()
+            .where('id', '=', ownerId)
+            .executeTakeFirstOrThrow();
+        const findSessions = () =>
+          database
+            .selectFrom('refresh_tokens')
+            .selectAll()
+            .where('user_id', '=', ownerId)
+            .orderBy('session_id')
+            .execute();
+        const beforeUser = await findUser();
+        const beforeSessions = await findSessions();
+        expect(beforeSessions).toHaveLength(1);
+
+        const response = await app.inject({
+          method,
+          url: `/users/${ownerId}`,
+          headers: { authorization: `Bearer ${another.tokens.access_token}` },
+          ...(method === 'PATCH' ? { payload: { age: 40 } } : {}),
+        });
+
+        expect(response.statusCode).toBe(403);
+        expect(await findUser()).toEqual(beforeUser);
+        expect(await findSessions()).toEqual(beforeSessions);
+      },
+    );
+
+    const methods = ['GET', 'PATCH', 'DELETE'] as const;
+    const invalidIds = [
+      '0',
+      '-1',
+      '2147483648',
+      '999999999999999999999',
+      '1.5',
+      'abc',
+    ];
+
+    it.each(
+      methods.flatMap((method) =>
+        invalidIds.map((id) => [method, id] as const),
+      ),
+    )('%s /users/%s возвращает 400', async (method, id) => {
+      const response = await app.inject({
+        method,
+        url: `/users/${id}`,
+        headers: { authorization: `Bearer ${owner.tokens.access_token}` },
+        ...(method === 'PATCH' ? { payload: { age: 30 } } : {}),
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it.each([
+      [1, 200],
+      [2147483647, 404],
+    ])('GET /users/%i возвращает %i для допустимого ID', async (id, status) => {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/users/${id}`,
+        headers: { authorization: `Bearer ${owner.tokens.access_token}` },
+      });
+
+      expect(response.statusCode).toBe(status);
+      if (status === 200) {
+        expect(response.json<PublicUser>()).toMatchObject({
+          id: legacyUserId,
+          login: 'legacy',
+        });
+      }
+    });
+
+    it.each([
+      ['GET', ''],
+      ['GET', '/me'],
+      ['GET', '/:id'],
+      ['PATCH', '/:id'],
+      ['DELETE', '/:id'],
+    ] as const)(
+      '%s /users%s без авторизации возвращает 401',
+      async (method, path) => {
+        const response = await app.inject({
+          method,
+          url: `/users${path.replace(':id', String(ownerId))}`,
+          ...(method === 'PATCH' ? { payload: { age: 30 } } : {}),
+        });
+
+        expect(response.statusCode).toBe(401);
+      },
+    );
+
+    it.each(['invalid', 'refresh'] as const)(
+      'отклоняет %s вместо access-токена',
+      async (type) => {
+        const token =
+          type === 'refresh' ? owner.tokens.refresh_token : 'invalid';
+        const response = await app.inject({
+          method: 'GET',
+          url: '/users/me',
+          headers: { authorization: `Bearer ${token}` },
+        });
+
+        expect(response.statusCode).toBe(401);
+      },
+    );
   });
 });
