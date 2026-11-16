@@ -24,7 +24,7 @@ export const createUserSchema = z.strictObject({
 
   description: textSchema.max(1000).nullish().meta({
     description: 'О себе. Можно не передавать или указать null',
-    example: 'Я продаю бананы, людей. Шучу, не бананы',
+    example: 'Люблю путешествовать, читать книги и кататься на велосипеде.',
   }),
 });
 

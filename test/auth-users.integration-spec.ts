@@ -26,6 +26,7 @@ import type { TokenPair } from '@/modules/auth/auth.service';
 import { hashToken } from '@/modules/auth/helpers/hash-token';
 import { RefreshTokensRepository } from '@/modules/sessions/refresh-tokens.repository';
 import { UsersRepository } from '@/modules/users/users.repository';
+import { REFRESH_TOKEN_COOKIE } from '@/modules/auth/constants/auth.constants';
 
 type PublicUser = {
   id: number;
@@ -182,7 +183,7 @@ describe('Auth and users (PostgreSQL)', () => {
     expect(Object.keys(tokens)).toEqual(['access_token']);
     expect(typeof tokens.access_token).toBe('string');
     const refreshCookie = response.cookies.find(
-      (cookie) => cookie.name === 'refresh_token',
+      (cookie) => cookie.name === REFRESH_TOKEN_COOKIE,
     );
     expect(refreshCookie).toMatchObject({
       httpOnly: true,
@@ -200,7 +201,7 @@ describe('Auth and users (PostgreSQL)', () => {
     return app.inject({
       method: 'POST',
       url: '/auth/refresh-token',
-      cookies: { refresh_token: token },
+      cookies: { [REFRESH_TOKEN_COOKIE]: token },
     });
   }
 
@@ -208,7 +209,7 @@ describe('Auth and users (PostgreSQL)', () => {
     return app.inject({
       method: 'POST',
       url: '/auth/logout',
-      cookies: { refresh_token: token },
+      cookies: { [REFRESH_TOKEN_COOKIE]: token },
     });
   }
 
@@ -714,7 +715,7 @@ describe('Auth and users (PostgreSQL)', () => {
     expect(response.statusCode).toBe(200);
     expect(response.cookies).toContainEqual(
       expect.objectContaining({
-        name: 'refresh_token',
+        name: REFRESH_TOKEN_COOKIE,
         value: '',
         path: '/auth',
         httpOnly: true,
