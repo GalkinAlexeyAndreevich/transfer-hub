@@ -403,103 +403,121 @@ describe('Auth and users (PostgreSQL)', () => {
     expect((await refresh(tokens.refresh_token)).statusCode).toBe(201);
   });
 
-  it.each(['до', 'после'] as const)(
-    'не оставляет сессию при удалении пользователя %s блокировки при входе',
-    async (deletionOrder) => {
-      const { user, tokens } = await register();
-      const storedUser = await database
-        .selectFrom('users')
-        .select('id')
-        .where('login', '=', user.login)
-        .executeTakeFirstOrThrow();
-      const repository = app.get(UsersRepository);
-      const databaseRepository = new UsersRepository(
-        app.get<DatabaseService>(DatabaseService),
-      );
-      const found = gate();
-      const release = gate();
-      jest
-        .spyOn(repository, 'findOneForUpdate')
-        .mockImplementationOnce(async (id, trx) => {
-          if (deletionOrder === 'до') {
-            found.resolve();
-            await release.promise;
-          }
+  async function startPausedLogin(checkpoint: 'before-lock' | 'after-lock') {
+    const { user, tokens } = await register();
+    const storedUser = await database
+      .selectFrom('users')
+      .select('id')
+      .where('login', '=', user.login)
+      .executeTakeFirstOrThrow();
+    const repository = app.get(UsersRepository);
+    const databaseRepository = new UsersRepository(
+      app.get<DatabaseService>(DatabaseService),
+    );
+    const paused = gate();
+    const release = gate();
+    const pauseLogin = async () => {
+      paused.resolve();
+      await release.promise;
+    };
+    jest
+      .spyOn(repository, 'findOneForUpdate')
+      .mockImplementationOnce(async (id, trx) => {
+        if (checkpoint === 'before-lock') {
+          await pauseLogin();
+        }
 
-          const result = await databaseRepository.findOneForUpdate(id, trx);
+        const result = await databaseRepository.findOneForUpdate(id, trx);
 
-          if (deletionOrder === 'после') {
-            found.resolve();
-            await release.promise;
-          }
+        if (checkpoint === 'after-lock') {
+          await pauseLogin();
+        }
 
-          return result;
-        });
+        return result;
+      });
 
-      const pendingLogin = app
-        .inject({
-          method: 'POST',
-          url: '/auth/login',
-          payload: { login: user.login, password: user.password },
-        })
-        .then((response) => response);
-      let pendingDeletion: Promise<LightMyRequestResponse> | undefined;
-      try {
-        await Promise.race([
-          found.promise,
+    const pendingLogin = app
+      .inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { login: user.login, password: user.password },
+      })
+      .then((response) => response);
+
+    return {
+      pendingLogin,
+      userId: storedUser.id,
+      waitForPause: () =>
+        Promise.race([
+          paused.promise,
           pendingLogin.then(() => {
             throw new Error('Вход завершился до контрольной точки');
           }),
-        ]);
-
-        if (deletionOrder === 'после') {
-          await expect(
-            database
-              .transaction()
-              .execute((trx) =>
-                trx
-                  .selectFrom('users')
-                  .select('id')
-                  .where('id', '=', storedUser.id)
-                  .forUpdate()
-                  .noWait()
-                  .execute(),
-              ),
-          ).rejects.toMatchObject({ code: '55P03' });
-        }
-
-        pendingDeletion = app
+        ]),
+      resumeLogin: release.resolve,
+      startDeletion: () =>
+        app
           .inject({
             method: 'DELETE',
             url: `/users/${storedUser.id}`,
             headers: { authorization: `Bearer ${tokens.access_token}` },
           })
-          .then((response) => response);
-
-        if (deletionOrder === 'до') {
-          expect((await pendingDeletion).statusCode).toBe(200);
-        }
-      } finally {
-        release.resolve();
-      }
-
-      const response = await pendingLogin;
-      expect(response.statusCode).toBe(deletionOrder === 'до' ? 401 : 201);
-      expect((await pendingDeletion)?.statusCode).toBe(200);
-      expect(
-        await database
+          .then((response) => response),
+      findSessions: () =>
+        database
           .selectFrom('refresh_tokens')
           .selectAll()
           .where('user_id', '=', storedUser.id)
           .execute(),
-      ).toEqual([]);
-      if (response.statusCode === 201) {
-        expect(
-          (await refresh(readTokens(response).refresh_token)).statusCode,
-        ).toBe(401);
-      }
-    },
-  );
+    };
+  }
+
+  it('не создаёт сессию при удалении пользователя до блокировки при входе', async () => {
+    const login = await startPausedLogin('before-lock');
+    try {
+      await login.waitForPause();
+      expect((await login.startDeletion()).statusCode).toBe(200);
+    } finally {
+      login.resumeLogin();
+    }
+
+    expect((await login.pendingLogin).statusCode).toBe(401);
+    expect(await login.findSessions()).toEqual([]);
+  });
+
+  it('отзывает сессию при удалении пользователя после блокировки при входе', async () => {
+    const login = await startPausedLogin('after-lock');
+    let pendingDeletion: Promise<LightMyRequestResponse>;
+    try {
+      await login.waitForPause();
+      await expect(
+        database
+          .transaction()
+          .execute((trx) =>
+            trx
+              .selectFrom('users')
+              .select('id')
+              .where('id', '=', login.userId)
+              .forUpdate()
+              .noWait()
+              .execute(),
+          ),
+      ).rejects.toMatchObject({ code: '55P03' });
+      pendingDeletion = login.startDeletion();
+    } finally {
+      login.resumeLogin();
+    }
+
+    const [response, deletion] = await Promise.all([
+      login.pendingLogin,
+      pendingDeletion,
+    ]);
+    expect(response.statusCode).toBe(201);
+    expect(deletion.statusCode).toBe(200);
+    expect(await login.findSessions()).toEqual([]);
+    const { refresh_token: refreshToken } = readTokens(response);
+    expect((await refresh(refreshToken)).statusCode).toBe(401);
+  });
 
   it('отклоняет сессию с несуществующим user_id на уровне БД', async () => {
     await expect(
@@ -910,23 +928,28 @@ describe('Auth and users (PostgreSQL)', () => {
       expect(response.statusCode).toBe(400);
     });
 
-    it.each([
-      [1, 200],
-      [2147483647, 404],
-    ])('GET /users/%i возвращает %i для допустимого ID', async (id, status) => {
+    it('GET /users/1 возвращает профиль существующего пользователя', async () => {
       const response = await app.inject({
         method: 'GET',
-        url: `/users/${id}`,
+        url: '/users/1',
         headers: { authorization: `Bearer ${owner.tokens.access_token}` },
       });
 
-      expect(response.statusCode).toBe(status);
-      if (status === 200) {
-        expect(response.json<PublicUser>()).toMatchObject({
-          id: legacyUserId,
-          login: 'legacy',
-        });
-      }
+      expect(response.statusCode).toBe(200);
+      expect(response.json<PublicUser>()).toMatchObject({
+        id: legacyUserId,
+        login: 'legacy',
+      });
+    });
+
+    it('GET /users/2147483647 возвращает 404 для отсутствующего пользователя', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/users/2147483647',
+        headers: { authorization: `Bearer ${owner.tokens.access_token}` },
+      });
+
+      expect(response.statusCode).toBe(404);
     });
 
     it.each([
