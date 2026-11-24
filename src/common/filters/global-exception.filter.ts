@@ -10,7 +10,6 @@ import {
   ForbiddenException,
   HttpException,
   HttpStatus,
-  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -49,8 +48,6 @@ function mapApplicationErrorToHttp(error: unknown): unknown {
 
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(GlobalExceptionFilter.name);
-
   catch(exception: unknown, host: ArgumentsHost): void {
     exception = mapApplicationErrorToHttp(exception);
     const context = host.switchToHttp();
@@ -93,10 +90,6 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       ) {
         code = body.code;
       }
-    }
-
-    if (statusCode >= 500) {
-      this.logger.error(exception);
     }
 
     if (response.sent || response.raw.headersSent) {

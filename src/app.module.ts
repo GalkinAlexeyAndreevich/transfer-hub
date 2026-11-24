@@ -9,7 +9,10 @@ import appConfig from '@/config/app.config';
 import databaseConfig from '@/config/database.config';
 import jwtConfig from '@/config/jwt.config';
 import { APP_FILTER } from '@nestjs/core';
+import { ClsModule } from 'nestjs-cls';
+import { LoggerModule } from 'nestjs-pino';
 import { GlobalExceptionFilter } from '@/common/filters/global-exception.filter';
+import { loggerConfig } from '@/common/logging/logger';
 
 @Module({
   imports: [
@@ -17,6 +20,8 @@ import { GlobalExceptionFilter } from '@/common/filters/global-exception.filter'
       isGlobal: true,
       load: [appConfig, databaseConfig, jwtConfig],
     }),
+    ClsModule.forRoot({ global: true }),
+    LoggerModule.forRoot(loggerConfig),
     DatabaseModule,
     UsersModule,
     AuthModule,
