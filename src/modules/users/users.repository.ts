@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import type { Insertable, Kysely, Transaction, Updateable } from 'kysely';
+import type {
+  ExpressionBuilder,
+  Insertable,
+  Kysely,
+  Transaction,
+  Updateable,
+} from 'kysely';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { DatabaseService } from '@/database/database.service';
 import type { Database } from '@/database/database.types';
 import { DatabaseError } from 'pg';
@@ -13,6 +20,37 @@ type UserChanges = Updateable<
 const publicFields = ['id', 'login', 'age', 'description'] as const;
 const profileFields = [...publicFields, 'email'] as const;
 
+// Формируем подзапрос с получением аватаров
+function activeAvatars(eb: ExpressionBuilder<Database, 'users'>) {
+  return jsonArrayFrom(
+    eb
+      .selectFrom('avatars')
+      .select([
+        'avatars.id',
+        'avatars.object_key as avatarKey',
+        'avatars.uploaded_at as uploadedAt',
+      ])
+      .whereRef('avatars.user_id', '=', 'users.id')
+      .where('avatars.deleted_at', 'is', null)
+      .orderBy('avatars.uploaded_at', 'desc')
+      .orderBy('avatars.id', 'desc'),
+  ).as('avatars');
+}
+
+type AvatarJson = { id: number; avatarKey: string; uploadedAt: string };
+
+// После конветации json необходимо вернуть uploadedAt как дату, а не строку
+function withAvatarDates<User extends { avatars: AvatarJson[] }>(user: User) {
+  const { avatars, ...fields } = user;
+  return {
+    ...fields,
+    avatars: avatars.map((avatar) => ({
+      ...avatar,
+      uploadedAt: new Date(avatar.uploadedAt),
+    })),
+  };
+}
+
 type FindUsersParams = {
   limit: number;
   offset: number;
@@ -25,11 +63,13 @@ export class UsersRepository {
 
   async create(data: NewUser) {
     try {
-      return await this.database.db
+      const user = await this.database.db
         .insertInto('users')
         .values(data)
         .returning(publicFields)
+        .returning(activeAvatars)
         .executeTakeFirstOrThrow();
+      return withAvatarDates(user);
     } catch (error: unknown) {
       this.uniqueUserError(error);
     }
@@ -49,6 +89,7 @@ export class UsersRepository {
     const [items, count] = await Promise.all([
       query
         .select(publicFields)
+        .select(activeAvatars)
         .orderBy('id', 'asc')
         .limit(limit)
         .offset(offset)
@@ -60,18 +101,20 @@ export class UsersRepository {
     ]);
 
     return {
-      items,
+      items: items.map(withAvatarDates),
       total: Number(count.total),
     };
   }
 
-  findOne(id: number) {
-    return this.database.db
+  async findOne(id: number) {
+    const user = await this.database.db
       .selectFrom('users')
       .select(publicFields)
+      .select(activeAvatars)
       .where('id', '=', id)
       .where('deleted_at', 'is', null)
       .executeTakeFirst();
+    return user && withAvatarDates(user);
   }
 
   findOneForUpdate(id: number, trx: Transaction<Database>) {
@@ -84,13 +127,15 @@ export class UsersRepository {
       .executeTakeFirst();
   }
 
-  findProfile(id: number) {
-    return this.database.db
+  async findProfile(id: number) {
+    const user = await this.database.db
       .selectFrom('users')
       .select(profileFields)
+      .select(activeAvatars)
       .where('id', '=', id)
       .where('deleted_at', 'is', null)
       .executeTakeFirst();
+    return user && withAvatarDates(user);
   }
 
   findAuthInfoByLogin(login: string) {
@@ -104,13 +149,15 @@ export class UsersRepository {
 
   async update(id: number, data: UserChanges) {
     try {
-      return await this.database.db
+      const user = await this.database.db
         .updateTable('users')
         .set(data)
         .where('id', '=', id)
         .where('deleted_at', 'is', null)
         .returning(publicFields)
+        .returning(activeAvatars)
         .executeTakeFirst();
+      return user && withAvatarDates(user);
     } catch (error: unknown) {
       this.uniqueUserError(error);
     }

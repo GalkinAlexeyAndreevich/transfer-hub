@@ -11,6 +11,7 @@ import {
   HttpException,
   HttpStatus,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { ArgumentsHost, ExceptionFilter } from '@nestjs/common';
@@ -20,14 +21,29 @@ import {
   RefreshTokenInactiveError,
 } from '@/modules/auth/errors/auth.errors';
 import { InvalidTokenError } from '@/modules/token/errors/token.errors';
+import {
+  AvatarLimitExceededError,
+  AvatarNotFoundError,
+  AvatarUploadFailedError,
+} from '@/modules/avatars/errors/avatar.errors';
 
 function mapApplicationErrorToHttp(error: unknown): unknown {
-  if (error instanceof UserAlreadyExistsError) {
+  if (
+    error instanceof UserAlreadyExistsError ||
+    error instanceof AvatarLimitExceededError
+  ) {
     return new ConflictException(error.message, { cause: error });
   }
 
-  if (error instanceof UserNotFoundError) {
+  if (
+    error instanceof UserNotFoundError ||
+    error instanceof AvatarNotFoundError
+  ) {
     return new NotFoundException(error.message, { cause: error });
+  }
+
+  if (error instanceof AvatarUploadFailedError) {
+    return new ServiceUnavailableException(error.message, { cause: error });
   }
 
   if (error instanceof ProfileAccessDeniedError) {

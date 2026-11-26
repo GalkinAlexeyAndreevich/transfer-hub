@@ -11,6 +11,14 @@ export interface Database {
     deleted_at: ColumnType<Date | null>;
   };
 
+  avatars: {
+    id: Generated<number>;
+    user_id: number;
+    object_key: string;
+    uploaded_at: Generated<Date>;
+    deleted_at: Generated<Date | null>;
+  };
+
   refresh_tokens: {
     session_id: string;
     token_hash: string;

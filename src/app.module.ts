@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from '@/database/database.module';
 import { UsersModule } from '@/modules/users/users.module';
+import { AvatarsModule } from '@/modules/avatars/avatars.module';
 import { AuthModule } from '@/modules/auth/auth.module';
 import appConfig from '@/config/app.config';
 import databaseConfig from '@/config/database.config';
@@ -24,6 +25,7 @@ import { loggerConfig } from '@/common/logging/logger';
     LoggerModule.forRoot(loggerConfig),
     DatabaseModule,
     UsersModule,
+    AvatarsModule,
     AuthModule,
   ],
   controllers: [AppController],
